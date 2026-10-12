@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '../api/client'
-import { budgetYearsApi } from '../api/endpoints'
+import { budgetYearsApi, cardsApi } from '../api/endpoints'
 import type { BudgetEntry, BudgetYear, BudgetYearLine } from '../api/types'
 import { renderPage } from '../test/render'
 import { YearPage } from './YearPage'
@@ -57,6 +57,7 @@ const cellsOf = (name: RegExp | string) =>
     .map((cell) => cell.textContent)
 
 beforeEach(() => {
+  vi.spyOn(cardsApi, 'list').mockResolvedValue([])
   localStorage.clear()
   // "Today" is in February 2026.
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -74,29 +75,46 @@ describe('YearPage', () => {
     expect(get).toHaveBeenCalledWith(2026)
     expect(screen.getByRole('cell', { name: 'Fixas' })).toBeInTheDocument()
     expect(screen.getByRole('cell', { name: 'Variáveis' })).toBeInTheDocument()
-    expect(cellsOf(/^Rent/)).toEqual(['1.000', '1.000', '1.000', '', '', '', '', '', '', '', '', '', '3.000', '1.000'])
-    expect(cellsOf(/^Power/).slice(0, 3)).toEqual(['120', '200', ''])
+    expect(cellsOf(/^Rent/)).toEqual(['1.000,00', '1.000,00', '1.000,00', '', '', '', '', '', '', '', '', '', '3.000,00', '1.000,00'])
+    expect(cellsOf(/^Power/).slice(0, 3)).toEqual(['120,00', '200,00', ''])
+  })
+
+  it('puts the totals on top of the bills, and keeps the bills of the cards side by side', async () => {
+    const card = (id: number, name: string, budgetLineId: number | null) => ({ id, name, closingDay: 10, dueDay: 17, budgetLineId, active: true, currentInvoiceMonth: '2026-02' })
+    const line = (id: number, name: string): BudgetYearLine => ({ id, name, kind: 'EXPENSE', groupName: null, dueDay: null, active: true, average: null, nature: 'VARIABLE' })
+    vi.spyOn(cardsApi, 'list').mockResolvedValue([card(1, 'Main', 11), card(2, 'Second', 14), card(3, 'Loose', null)])
+    vi.spyOn(budgetYearsApi, 'get').mockResolvedValue(budgetOf(2026, [line(10, 'Power'), line(11, 'Main card'), line(12, 'Gas'), line(13, 'Water'), line(14, 'Second card')]))
+    renderPage(<YearPage />)
+    const table = await screen.findByRole('region', { name: 'Contas do ano' })
+
+    // The second card's bill comes up to sit beside the first one's.
+    await screen.findByRole('row', { name: /^Second card/ })
+    await vi.waitFor(() =>
+      expect(within(table).getAllByRole('rowheader').map((header) => header.textContent)).toEqual([
+        'Total gasto', 'Sobra', 'Power', 'Main card', 'Second card', 'Gas', 'Water',
+      ]),
+    )
   })
 
   it('sums the occasional bills in one row until their detail is asked for', async () => {
     const { user } = await renderYear()
 
-    expect(cellsOf(/^Extra 2 itens/)).toEqual(['50', '', '80', '', '', '', '', '', '', '', '', '', '130', '11'])
+    expect(cellsOf(/^Extra 2 itens/)).toEqual(['50,00', '', '80,00', '', '', '', '', '', '', '', '', '', '130,00', '10,83'])
     expect(screen.queryByRole('row', { name: /^Fine/ })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Detalhar extras' }))
 
-    expect(cellsOf(/^Fine/).slice(0, 3)).toEqual(['50', '', ''])
-    expect(cellsOf(/^Doctor/).slice(0, 3)).toEqual(['', '', '80'])
+    expect(cellsOf(/^Fine/).slice(0, 3)).toEqual(['50,00', '', ''])
+    expect(cellsOf(/^Doctor/).slice(0, 3)).toEqual(['', '', '80,00'])
     expect(screen.queryByRole('row', { name: /^Extra 2 itens/ })).not.toBeInTheDocument()
   })
 
   it('closes the table with what was spent and what was left in each month', async () => {
     await renderYear()
 
-    expect(cellsOf(/^Total gasto/).slice(0, 3)).toEqual(['1.120', '1.200', '1.000'])
-    expect(cellsOf(/^Total gasto/).slice(12)).toEqual(['3.320', '1.107'])
-    expect(cellsOf(/^Sobra/).slice(0, 3)).toEqual(['3.880', '3.800', '-1.000'])
+    expect(cellsOf(/^Total gasto/).slice(0, 3)).toEqual(['1.120,00', '1.200,00', '1.000,00'])
+    expect(cellsOf(/^Total gasto/).slice(12)).toEqual(['3.320,00', '1.106,67'])
+    expect(cellsOf(/^Sobra/).slice(0, 3)).toEqual(['3.880,00', '3.800,00', '-1.000,00'])
     const balances = within(screen.getByRole('row', { name: /^Sobra/ })).getAllByRole('cell')
     expect(balances[0]).toHaveClass('positive')
     expect(balances[2]).toHaveClass('negative')
@@ -126,8 +144,8 @@ describe('YearPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Mostrar receitas' }))
 
-    expect(cellsOf(/^Salary/).slice(0, 2)).toEqual(['5.000', '5.000'])
-    expect(cellsOf(/^Total de receitas/).slice(0, 2)).toEqual(['5.000', '5.000'])
+    expect(cellsOf(/^Salary/).slice(0, 2)).toEqual(['5.000,00', '5.000,00'])
+    expect(cellsOf(/^Total de receitas/).slice(0, 2)).toEqual(['5.000,00', '5.000,00'])
   })
 
   it('sums up the year and the current month above the table', async () => {

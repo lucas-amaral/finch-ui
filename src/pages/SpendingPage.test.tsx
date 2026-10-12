@@ -59,17 +59,17 @@ describe('SpendingPage', () => {
     expect(within(table).getAllByRole('rowheader').map((header) => header.textContent)).toEqual([
       'Mercado', 'Gasolina', 'Outros', 'Parcelado', 'Alimentação', 'Sem alimentação', 'Total', 'Variação',
     ])
-    expect(cellsOf(table, /^Mercado/)).toEqual(['401', '300', '', '', '', '', '', '', '', '', '', '', '701', '350'])
-    expect(cellsOf(table, /^Total/).slice(0, 3)).toEqual(['701', '500', ''])
+    expect(cellsOf(table, /^Mercado/)).toEqual(['400,50', '300,00', '', '', '', '', '', '', '', '', '', '', '700,50', '350,25'])
+    expect(cellsOf(table, /^Total/).slice(0, 3)).toEqual(['700,50', '500,00', ''])
   })
 
   it('shows how the total moved from the month before, with more spending as the bad direction', async () => {
     const { table } = await renderSpending()
     const change = within(within(table).getByRole('row', { name: /^Variação/ })).getAllByRole('cell')
 
-    expect(change[0]).toHaveTextContent('+151')
+    expect(change[0]).toHaveTextContent('+150,50')
     expect(change[0]).toHaveClass('negative')
-    expect(change[1]).toHaveTextContent('-200')
+    expect(change[1]).toHaveTextContent('-200,50')
     expect(change[1]).toHaveClass('positive')
   })
 

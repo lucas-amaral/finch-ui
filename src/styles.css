@@ -2024,3 +2024,63 @@ a.button {
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   white-space: pre-wrap;
 }
+
+/* A table that is the whole content of its screen takes the width of the screen. */
+.budget-table-wide {
+  width: 100%;
+  font-size: 12px;
+}
+
+.budget-table-wide th,
+.budget-table-wide td {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+/* The year at a glance: the totals sit on top of the bills they add up. */
+.year-table .summary-row th,
+.year-table .summary-row td {
+  font-weight: 800;
+  background: var(--surface-muted);
+}
+
+.year-table .summary-row td.selected {
+  background: var(--primary-soft);
+}
+
+.year-table th,
+.year-table td {
+  padding-left: 0.3rem;
+  padding-right: 0.3rem;
+}
+
+.check-note {
+  font-size: 0.92rem;
+}
+
+/* ---------- future: the balances of a month, account by account ---------- */
+
+.account-group {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.account-group legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0 0.3rem;
+  font-weight: 700;
+}
+
+.account-row {
+  display: grid;
+  grid-template-columns: 1fr 10rem;
+  align-items: center;
+  gap: 0.75rem;
+}

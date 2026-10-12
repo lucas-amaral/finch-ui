@@ -1,21 +1,21 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Landmark, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { FormEvent } from 'react'
 import { errorMessage, fieldErrors } from '../api/client'
-import { balancesApi } from '../api/endpoints'
-import type { BalanceInput, BalanceMonth, BalanceYear } from '../api/types'
+import { balanceAccountsApi, balancesApi } from '../api/endpoints'
+import type { BalanceAccount, BalanceInput, BalanceKind, BalanceMonth, BalanceYear } from '../api/types'
 import { CurrencyInput } from '../components/CurrencyInput'
-import { ErrorBanner, Field, Kpi, Loading, Modal, PageHeader } from '../components/ui'
+import { ErrorBanner, Field, IconButton, Kpi, Loading, Modal, PageHeader } from '../components/ui'
 import { MONTH_NAMES, currentYearMonth, formatAmount, formatMoney, formatWhole, toYearMonth } from '../lib/format'
 import { useLoad } from '../lib/useLoad'
 
 /** The places the money can be, in the order of the columns. */
-const PLACES: { field: keyof BalanceInput; label: string }[] = [
-  { field: 'checking', label: 'Conta' },
-  { field: 'savings', label: 'Guardado' },
-  { field: 'company', label: 'Empresa' },
-  { field: 'invested', label: 'Investido' },
+const PLACES: { field: keyof BalanceInput; kind: BalanceKind; label: string }[] = [
+  { field: 'checking', kind: 'CHECKING', label: 'Conta' },
+  { field: 'savings', kind: 'SAVINGS', label: 'Guardado' },
+  { field: 'company', kind: 'COMPANY', label: 'Empresa' },
+  { field: 'invested', kind: 'INVESTED', label: 'Investido' },
 ]
 
 export function BalancesPage() {
@@ -27,6 +27,8 @@ export function BalancesPage() {
     const previous = current.months.some((month) => month.snapshot) ? null : await balancesApi.year(year - 1)
     return { current, previous }
   }, [year])
+  const accounts = useLoad(() => balanceAccountsApi.list(), [])
+  const [managingAccounts, setManagingAccounts] = useState(false)
   const [editing, setEditing] = useState<BalanceMonth | null>(null)
   const [monthly, setMonthly] = useState(() => localStorage.getItem(PROJECTION_KEY) ?? '10000.00')
   const data = balances.data?.current
@@ -49,6 +51,10 @@ export function BalancesPage() {
             <ChevronRight size={18} aria-hidden />
           </button>
         </div>
+        <button type="button" className="button" onClick={() => setManagingAccounts(true)}>
+          <Landmark size={16} aria-hidden />
+          Contas
+        </button>
         <Link to="/future/history" className="button">
           Histórico dos anos
         </Link>
@@ -59,7 +65,7 @@ export function BalancesPage() {
       {data && (
         <section className="panel budget-card" aria-label="Caixa">
           <div className="table-wrapper">
-            <table className="budget-table">
+            <table className="budget-table budget-table-wide">
               <thead>
                 <tr>
                   <th>Mês</th>
@@ -108,7 +114,26 @@ export function BalancesPage() {
           </div>
         </section>
       )}
-      {editing && data && (
+      {managingAccounts && (
+        <AccountsManager
+          accounts={accounts.data ?? []}
+          onChanged={accounts.reload}
+          onClose={() => setManagingAccounts(false)}
+        />
+      )}
+      {editing && data && (accounts.data ?? []).some((account) => account.active) && (
+        <AccountBalancesForm
+          year={data.year}
+          month={editing}
+          accounts={(accounts.data ?? []).filter((account) => account.active)}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            balances.reload()
+          }}
+        />
+      )}
+      {editing && data && !(accounts.data ?? []).some((account) => account.active) && (
         <BalanceForm
           year={data.year}
           month={editing}
@@ -302,6 +327,195 @@ function BalanceForm({ year, month, onClose, onSaved }: BalanceFormProps) {
           </button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+interface AccountBalancesFormProps {
+  year: number
+  month: BalanceMonth
+  /** The active accounts, in the order of the screen. */
+  accounts: BalanceAccount[]
+  onClose: () => void
+  onSaved: () => void
+}
+
+/** The balances of a month, account by account; the four totals of the month become their sums. */
+function AccountBalancesForm({ year, month, accounts, onClose, onSaved }: AccountBalancesFormProps) {
+  const key = toYearMonth(year, month.month)
+  const stored = useLoad(() => balancesApi.accounts(key), [])
+  /** What was typed, by account id; an account not touched keeps what was stored. */
+  const [typed, setTyped] = useState<Record<number, string>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const storedOf = (id: number) => stored.data?.find((each) => each.accountId === id)?.amount.toFixed(2) ?? ''
+  const valueOf = (id: number) => typed[id] ?? storedOf(id)
+  const sumOf = (kind: BalanceKind) =>
+    accounts.filter((account) => account.kind === kind).reduce((total, account) => total + Number(valueOf(account.id)), 0)
+  /** Written down before the accounts existed: only the four totals are known. */
+  const totalsOnly = month.snapshot !== null && stored.data?.length === 0
+
+  async function run(action: () => Promise<unknown>) {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await action()
+      onSaved()
+    } catch (caught) {
+      setError(errorMessage(caught))
+      setSubmitting(false)
+    }
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    // An account left empty has nothing in it that month.
+    const amounts = accounts.filter((account) => valueOf(account.id) !== '').map((account) => ({ accountId: account.id, amount: Number(valueOf(account.id)) }))
+    void run(() => balancesApi.setAccounts(key, amounts))
+  }
+
+  return (
+    <Modal title={`Caixa · ${MONTH_NAMES[month.month - 1].toLowerCase()} de ${year}`} onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <ErrorBanner message={error ?? stored.error} />
+        {stored.loading && !stored.data && <Loading />}
+        {totalsOnly && (
+          <p className="muted">
+            Este mês foi anotado só pelos totais ({formatMoney(month.snapshot!.total)}). Ao salvar por conta, os totais passam a ser a soma das
+            contas.
+          </p>
+        )}
+        {stored.data &&
+          PLACES.filter((place) => accounts.some((account) => account.kind === place.kind)).map((place) => (
+            <fieldset key={place.kind} className="account-group">
+              <legend>
+                <span>{place.label}</span>
+                <span className="numeric">{formatAmount(sumOf(place.kind))}</span>
+              </legend>
+              {accounts
+                .filter((account) => account.kind === place.kind)
+                .map((account) => (
+                  <label key={account.id} className="account-row">
+                    <span>{account.name}</span>
+                    <CurrencyInput value={valueOf(account.id)} onChange={(value) => setTyped({ ...typed, [account.id]: value })} />
+                  </label>
+                ))}
+            </fieldset>
+          ))}
+        <p className="import-summary">
+          <span>Total do mês</span>
+          <strong className="numeric">{formatMoney(PLACES.reduce((total, place) => total + sumOf(place.kind), 0))}</strong>
+        </p>
+        <div className="form-actions">
+          {month.snapshot && (
+            <button type="button" className="button button-danger push-left" onClick={() => void run(() => balancesApi.clear(key))} disabled={submitting}>
+              Limpar
+            </button>
+          )}
+          <button type="button" className="button" onClick={onClose}>
+            Cancelar
+          </button>
+          <button type="submit" className="button button-primary" disabled={submitting || !stored.data}>
+            Salvar
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+interface AccountsManagerProps {
+  accounts: BalanceAccount[]
+  onChanged: () => void
+  onClose: () => void
+}
+
+/** The accounts behind each of the four totals: the list, by kind, with a short form to add one more. */
+function AccountsManager({ accounts, onChanged, onClose }: AccountsManagerProps) {
+  const [name, setName] = useState('')
+  const [kind, setKind] = useState<BalanceKind>('CHECKING')
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function run(action: () => Promise<unknown>, done?: () => void) {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await action()
+      done?.()
+      onChanged()
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    void run(() => balanceAccountsApi.create({ name, kind, active: true }), () => setName(''))
+  }
+
+  return (
+    <Modal title="Contas" onClose={onClose}>
+      <div className="form">
+        <p className="muted">
+          Cada conta entra em um dos quatro totais. Com contas cadastradas, o saldo do mês é informado conta a conta e os totais são somados
+          sozinhos.
+        </p>
+        <ErrorBanner message={error} />
+        {accounts.length === 0 && <p className="muted">Nenhuma conta ainda: os meses são anotados direto pelos quatro totais.</p>}
+        {accounts.length > 0 && (
+          <ul className="rows recurring-list" aria-label="Contas cadastradas">
+            {accounts.map((account) => (
+              <li key={account.id}>
+                <span className="row-text">
+                  <strong>{account.name}</strong>
+                  <span className="muted">
+                    {PLACES.find((place) => place.kind === account.kind)!.label}
+                    {account.active ? '' : ' · inativa'}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="button button-small"
+                  onClick={() => void run(() => balanceAccountsApi.update(account.id, { name: account.name, kind: account.kind, active: !account.active }))}
+                  aria-label={`${account.active ? 'Desativar' : 'Reativar'} ${account.name}`}
+                >
+                  {account.active ? 'Desativar' : 'Reativar'}
+                </button>
+                <IconButton label={`Excluir ${account.name}`} onClick={() => void run(() => balanceAccountsApi.remove(account.id))} danger>
+                  <Trash2 size={15} aria-hidden />
+                </IconButton>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form className="form" onSubmit={submit} aria-label="Nova conta">
+          <div className="form-row">
+            <Field label="Nome da conta">
+              <input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} required />
+            </Field>
+            <Field label="Entra em">
+              <select value={kind} onChange={(event) => setKind(event.target.value as BalanceKind)}>
+                {PLACES.map((place) => (
+                  <option key={place.kind} value={place.kind}>
+                    {place.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="form-actions">
+            <button type="button" className="button" onClick={onClose}>
+              Fechar
+            </button>
+            <button type="submit" className="button button-primary" disabled={submitting}>
+              Adicionar
+            </button>
+          </div>
+        </form>
+      </div>
     </Modal>
   )
 }

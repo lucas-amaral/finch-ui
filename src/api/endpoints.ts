@@ -1,5 +1,8 @@
 import { request } from './client'
 import type {
+  AccountAmount,
+  BalanceAccount,
+  BalanceAccountInput,
   BalanceInput,
   BalanceSnapshot,
   BalanceYear,
@@ -132,6 +135,18 @@ export const balancesApi = {
   /** `month` is `yyyy-MM`. Creates the balances of the month or replaces the ones that are there. */
   set: (month: string, input: BalanceInput) => request<BalanceSnapshot>('PUT', `/api/balance-snapshots/${month}`, input),
   clear: (month: string) => request<void>('DELETE', `/api/balance-snapshots/${month}`),
+  /** The balance of each account in the month; empty when the month only has its totals. */
+  accounts: (month: string) => request<AccountAmount[]>('GET', `/api/balance-snapshots/${month}/accounts`),
+  /** Writes down the balance of each account; the totals of the month become their sums by kind. */
+  setAccounts: (month: string, amounts: AccountAmount[]) =>
+    request<BalanceSnapshot>('PUT', `/api/balance-snapshots/${month}/accounts`, { amounts }),
+}
+
+export const balanceAccountsApi = {
+  list: () => request<BalanceAccount[]>('GET', '/api/balance-accounts'),
+  create: (input: BalanceAccountInput) => request<BalanceAccount>('POST', '/api/balance-accounts', input),
+  update: (id: number, input: BalanceAccountInput) => request<BalanceAccount>('PUT', `/api/balance-accounts/${id}`, input),
+  remove: (id: number) => request<void>('DELETE', `/api/balance-accounts/${id}`),
 }
 
 export const companyApi = {

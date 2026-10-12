@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { budgetYearsApi } from '../api/endpoints'
+import { budgetYearsApi, cardsApi } from '../api/endpoints'
 import type { BudgetMonth, BudgetYear, BudgetYearLine } from '../api/types'
 import { ErrorBanner, Kpi, Loading, PageHeader, Stepper, Toggle } from '../components/ui'
 import { MONTH_STATE_LABELS, NATURES, NATURE_GROUP_LABELS, deviationOf, entryOf, monthStateOf } from '../lib/budget'
-import { MONTH_NAMES, currentYearMonth, formatMoney, formatWhole, toYearMonth } from '../lib/format'
+import { MONTH_NAMES, currentYearMonth, formatAmount, formatMoney, toYearMonth } from '../lib/format'
 import { useLoad } from '../lib/useLoad'
 import { useStoredFlag } from '../lib/useStoredFlag'
 
@@ -23,6 +23,9 @@ export function YearPage() {
   const [year, setYear] = useState(today.year)
   const [selected, setSelected] = useState(today.month)
   const budget = useLoad(() => budgetYearsApi.get(year), [year])
+  // Only to keep the bills of the cards side by side; without them the table just keeps its usual order.
+  const cards = useLoad(() => cardsApi.list().catch(() => []), [])
+  const cardLineIds = new Set((cards.data ?? []).flatMap((card) => card.budgetLineId ?? []))
   const [showIncome, toggleIncome] = useStoredFlag('finch.year.income', false)
   const [highlight, toggleHighlight] = useStoredFlag('finch.year.highlight', true)
   const [detailExtras, toggleExtras] = useStoredFlag('finch.year.extras', false)
@@ -78,6 +81,7 @@ export function YearPage() {
             showIncome={showIncome}
             highlight={highlight}
             detailExtras={detailExtras}
+            cardLineIds={cardLineIds}
           />
         </>
       )}
@@ -176,10 +180,12 @@ interface YearTableProps {
   highlight: boolean
   /** Whether the occasional bills get a row each instead of one row with their sum. */
   detailExtras: boolean
+  /** The bills that receive the invoice of a card: shown together, where the first of them is. */
+  cardLineIds: Set<number>
 }
 
-function YearTable({ budget, today, selected, onSelect, showIncome, highlight, detailExtras }: YearTableProps) {
-  const expenses = budget.lines.filter((line) => line.kind === 'EXPENSE')
+function YearTable({ budget, today, selected, onSelect, showIncome, highlight, detailExtras, cardLineIds }: YearTableProps) {
+  const expenses = keepTogether(budget.lines.filter((line) => line.kind === 'EXPENSE'), (line) => cardLineIds.has(line.id))
   const incomeLines = budget.lines.filter((line) => line.kind === 'INCOME')
   const largestBalance = Math.max(1, ...budget.months.map((month) => Math.abs(month.balance)))
   const columnClass = (month: number) => (month === selected ? 'selected' : undefined)
@@ -199,12 +205,12 @@ function YearTable({ budget, today, selected, onSelect, showIncome, highlight, d
           ]
           return (
             <td key={month.month} className={classes.filter(Boolean).join(' ') || undefined}>
-              {entry ? formatWhole(entry.amount) : ''}
+              {entry ? formatAmount(entry.amount) : ''}
             </td>
           )
         })}
-        <td className="strong">{formatWhole(total)}</td>
-        <td className="muted">{line.average === null ? '' : formatWhole(line.average)}</td>
+        <td className="strong">{formatAmount(total)}</td>
+        <td className="muted">{line.average === null ? '' : formatAmount(line.average)}</td>
       </tr>
     )
   }
@@ -221,11 +227,11 @@ function YearTable({ budget, today, selected, onSelect, showIncome, highlight, d
         </th>
         {budget.months.map((month) => (
           <td key={month.month} className={columnClass(month.month)}>
-            {sumIn(month) === 0 ? '' : formatWhole(sumIn(month))}
+            {sumIn(month) === 0 ? '' : formatAmount(sumIn(month))}
           </td>
         ))}
-        <td className="strong">{formatWhole(sumOf(sumIn))}</td>
-        <td className="muted">{formatWhole(sumOf(sumIn) / 12)}</td>
+        <td className="strong">{formatAmount(sumOf(sumIn))}</td>
+        <td className="muted">{formatAmount(sumOf(sumIn) / 12)}</td>
       </tr>
     )
   }
@@ -233,15 +239,15 @@ function YearTable({ budget, today, selected, onSelect, showIncome, highlight, d
   function totalRow(label: string, pick: (month: BudgetMonth) => number, average: number | null, signed = false) {
     const toneOf = (value: number) => (signed ? (value < 0 ? 'negative' : 'positive') : undefined)
     return (
-      <tr>
+      <tr key={label} className="summary-row">
         <th scope="row">{label}</th>
         {budget.months.map((month) => (
           <td key={month.month} className={[columnClass(month.month), toneOf(pick(month))].filter(Boolean).join(' ') || undefined}>
-            {formatWhole(pick(month))}
+            {formatAmount(pick(month))}
           </td>
         ))}
-        <td className={toneOf(sumOf(pick))}>{formatWhole(sumOf(pick))}</td>
-        <td className={average === null ? undefined : toneOf(average)}>{average === null ? '' : formatWhole(average)}</td>
+        <td className={toneOf(sumOf(pick))}>{formatAmount(sumOf(pick))}</td>
+        <td className={average === null ? undefined : toneOf(average)}>{average === null ? '' : formatAmount(average)}</td>
       </tr>
     )
   }
@@ -281,6 +287,10 @@ function YearTable({ budget, today, selected, onSelect, showIncome, highlight, d
             </tr>
           </thead>
           <tbody>
+            {/* What matters most comes first: how much was spent and how much was left. */}
+            {totalRow('Total gasto', (month) => month.expenseTotal, budget.averages.expenseTotal)}
+            {showIncome && totalRow('Total de receitas', (month) => month.incomeTotal, budget.averages.incomeTotal)}
+            {totalRow('Sobra', (month) => month.balance, budget.averages.balance, true)}
             {NATURES.map((nature) => {
               const lines = expenses.filter((line) => line.nature === nature)
               if (lines.length === 0) return null
@@ -292,11 +302,6 @@ function YearTable({ budget, today, selected, onSelect, showIncome, highlight, d
             })}
             {showIncome && incomeLines.length > 0 && <Group name="Receitas">{incomeLines.map(lineRow)}</Group>}
           </tbody>
-          <tfoot>
-            {totalRow('Total gasto', (month) => month.expenseTotal, budget.averages.expenseTotal)}
-            {showIncome && totalRow('Total de receitas', (month) => month.incomeTotal, budget.averages.incomeTotal)}
-            {totalRow('Sobra', (month) => month.balance, budget.averages.balance, true)}
-          </tfoot>
         </table>
       </div>
       <p className="legend">
@@ -320,6 +325,15 @@ function YearTable({ budget, today, selected, onSelect, showIncome, highlight, d
       </p>
     </section>
   )
+}
+
+/** Moves the items that match to right after the first of them, keeping every other item where it was. */
+function keepTogether<T>(items: T[], matches: (item: T) => boolean): T[] {
+  const first = items.findIndex(matches)
+  if (first < 0) return items
+  const others = items.filter((item, index) => index <= first || !matches(item))
+  const moved = items.filter((item, index) => index > first && matches(item))
+  return [...others.slice(0, first + 1), ...moved, ...others.slice(first + 1)]
 }
 
 function Group({ name, children }: { name: string; children: React.ReactNode }) {

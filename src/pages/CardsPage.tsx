@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, FileUp, Pencil, Plus, Repeat, Settings2, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { errorMessage, fieldErrors } from '../api/client'
@@ -9,6 +9,7 @@ import { CurrencyInput } from '../components/CurrencyInput'
 import { InvoiceImport } from '../components/InvoiceImport'
 import { ErrorBanner, Field, IconButton, Kpi, Loading, Modal, PageHeader } from '../components/ui'
 import { MONTH_NAMES, formatAmount, formatDayMonth, formatMoney, formatMonthLabel, shiftMonth, todayIso } from '../lib/format'
+import { CENTS_TOLERANCE, limitCheck } from '../lib/limitCheck'
 import { useLoad } from '../lib/useLoad'
 
 /** The purchase form is open for a new purchase, or for the one with this id. */
@@ -331,9 +332,8 @@ function Outlook({ card, invoice }: { card: CreditCard; invoice: CardInvoice }) 
   if (!others.data) return others.error ? <ErrorBanner message={others.error} onRetry={others.reload} /> : <Loading />
   const past = [...others.data.slice(0, BEHIND), invoice]
   const future = others.data.slice(BEHIND)
-  const committed = future.reduce((sum, each) => sum + each.total, 0)
-  const expected = invoice.total + committed
-  const difference = Number(used) - expected
+  const check = limitCheck(invoice, others.data.slice(0, BEHIND), future, todayIso())
+  const difference = Number(used) - check.expected
   const usual = past.slice(0, BEHIND).reduce((sum, each) => sum + each.total, 0) / BEHIND
 
   return (
@@ -362,18 +362,35 @@ function Outlook({ card, invoice }: { card: CreditCard; invoice: CardInvoice }) 
             <CurrencyInput value={used} onChange={setUsed} />
           </Field>
           <dl className="check-lines">
-            <dt>Fatura de {formatMonthLabel(invoice.month)}</dt>
-            <dd>{formatAmount(invoice.total)}</dd>
-            <dt title="Os recorrentes previstos não entram nesta conta.">Próximas faturas, já lançado</dt>
-            <dd>{formatAmount(committed)}</dd>
+            {check.unpaid.map((each) => (
+              <Fragment key={each.month}>
+                <dt title="Já fechou, mas só sai do limite quando for paga.">
+                  Fatura de {formatMonthLabel(each.month)}, ainda não paga (vence {formatDayMonth(each.dueDate)})
+                </dt>
+                <dd>{formatAmount(each.total)}</dd>
+              </Fragment>
+            ))}
+            <dt>Fatura de {formatMonthLabel(invoice.month)}, já cobrado</dt>
+            <dd>{formatAmount(check.counted)}</dd>
+            <dt title="Só as parcelas: o que está à vista nas próximas faturas é previsão e ainda não ocupa limite.">
+              Parcelas das próximas faturas
+            </dt>
+            <dd>{formatAmount(check.nextInstallments)}</dd>
             <dt>Soma</dt>
-            <dd>{formatAmount(expected)}</dd>
+            <dd>{formatAmount(check.expected)}</dd>
           </dl>
+          {check.notYetCharged !== 0 && (
+            <p className="muted check-note">
+              Fora da conta: {formatMoney(check.notYetCharged)} de compras à vista desta fatura com data futura, que o banco ainda não cobrou.
+            </p>
+          )}
           {used !== '' && (
-            <p className={Math.abs(difference) < 0.005 ? 'check-result check-ok' : 'check-result'} role="status">
+            <p className={Math.abs(difference) < CENTS_TOLERANCE ? 'check-result check-ok' : 'check-result'} role="status">
               {Math.abs(difference) < 0.005
                 ? 'Tudo conferido'
-                : `${difference > 0 ? 'Falta lançar' : 'Lançado a mais'} ${formatMoney(Math.abs(difference))}`}
+                : Math.abs(difference) < CENTS_TOLERANCE
+                  ? `Conferido, com ${formatMoney(Math.abs(difference))} de diferença: centavos de arredondamento das parcelas`
+                  : `${difference > 0 ? 'Falta lançar' : 'Lançado a mais'} ${formatMoney(Math.abs(difference))}`}
             </p>
           )}
         </div>

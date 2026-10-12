@@ -303,6 +303,27 @@ export interface BalanceInput {
   invested: number
 }
 
+/** The four places the money is added up by; the fields of `BalanceInput`, as the API names them. */
+export type BalanceKind = 'CHECKING' | 'SAVINGS' | 'COMPANY' | 'INVESTED'
+
+/** One of the accounts the money is in: a bank account, a savings pot, an investment. */
+export interface BalanceAccount {
+  id: number
+  name: string
+  kind: BalanceKind
+  /** An inactive account keeps its history but is no longer asked for when a month is written down. */
+  active: boolean
+  sortOrder: number
+}
+
+export type BalanceAccountInput = Pick<BalanceAccount, 'name' | 'kind' | 'active'>
+
+/** How much there was in an account in a month. */
+export interface AccountAmount {
+  accountId: number
+  amount: number
+}
+
 export interface BalanceSnapshot extends BalanceInput {
   /** `yyyy-MM`. */
   month: string

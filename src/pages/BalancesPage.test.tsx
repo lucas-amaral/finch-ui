@@ -1,8 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '../api/client'
-import { balancesApi } from '../api/endpoints'
-import type { BalanceSnapshot, BalanceYear } from '../api/types'
+import { balanceAccountsApi, balancesApi } from '../api/endpoints'
+import type { BalanceAccount, BalanceSnapshot, BalanceYear } from '../api/types'
 import { renderPage } from '../test/render'
 import { BalancesPage } from './BalancesPage'
 
@@ -27,6 +27,7 @@ async function renderBalances() {
 }
 
 beforeEach(() => {
+  vi.spyOn(balanceAccountsApi, 'list').mockResolvedValue([])
   localStorage.clear()
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-02-15T15:00:00Z'))
@@ -134,5 +135,70 @@ describe('BalancesPage', () => {
     // 2025 ended in February with 1.050,50; January 2026 is eleven months later.
     const january = await screen.findByRole('row', { name: /^Janeiro/ })
     expect(within(january).getByText('111.050,50')).toBeInTheDocument()
+  })
+
+  describe('with accounts', () => {
+    const account = (id: number, name: string, kind: BalanceAccount['kind'], active = true): BalanceAccount => ({ id, name, kind, active, sortOrder: id })
+    const accounts = [account(1, 'Bank A', 'CHECKING'), account(2, 'Bank B', 'CHECKING'), account(3, 'Fund', 'INVESTED'), account(4, 'Old', 'SAVINGS', false)]
+
+    async function openMarch() {
+      const rendered = await renderBalances()
+      vi.spyOn(balanceAccountsApi, 'list').mockResolvedValue(accounts)
+      return rendered
+    }
+
+    it('asks for the balance of each active account, by kind, and sends them all', async () => {
+      vi.spyOn(balanceAccountsApi, 'list').mockResolvedValue(accounts)
+      vi.spyOn(balancesApi, 'accounts').mockResolvedValue([{ accountId: 1, amount: 1000 }])
+      const set = vi.spyOn(balancesApi, 'setAccounts').mockResolvedValue(snapshot('2026-03', 1))
+      const { user } = await renderBalances()
+
+      await user.click(screen.getByRole('button', { name: 'Março' }))
+      const dialog = screen.getByRole('dialog', { name: 'Caixa · março de 2026' })
+      expect(await within(dialog).findByLabelText('Bank A')).toHaveValue('1.000,00')
+      expect(within(dialog).queryByLabelText('Old')).not.toBeInTheDocument()
+      await user.type(within(dialog).getByLabelText('Bank B'), '25050')
+      await user.type(within(dialog).getByLabelText('Fund'), '500000')
+
+      // The total of each kind and of the month follow what is typed.
+      expect(within(dialog).getByRole('group', { name: /^Conta/ })).toHaveTextContent('1.250,50')
+      expect(within(dialog).getByText('Total do mês').nextSibling).toHaveTextContent('R$ 6.250,50')
+      await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+
+      expect(set).toHaveBeenCalledWith('2026-03', [
+        { accountId: 1, amount: 1000 },
+        { accountId: 2, amount: 250.5 },
+        { accountId: 3, amount: 5000 },
+      ])
+    })
+
+    it('says so when the month was written down by its totals only', async () => {
+      vi.spyOn(balanceAccountsApi, 'list').mockResolvedValue(accounts)
+      vi.spyOn(balancesApi, 'accounts').mockResolvedValue([])
+      const { user } = await renderBalances()
+
+      await user.click(screen.getByRole('button', { name: 'Janeiro' }))
+
+      expect(await screen.findByText(/Este mês foi anotado só pelos totais \(R\$\s1\.350,50\)/)).toBeInTheDocument()
+    })
+
+    it('manages the accounts: adds one under a kind, switches one off, removes one', async () => {
+      const { user } = await openMarch()
+      const create = vi.spyOn(balanceAccountsApi, 'create').mockResolvedValue(account(5, 'Pot', 'SAVINGS'))
+      const update = vi.spyOn(balanceAccountsApi, 'update').mockResolvedValue(account(1, 'Bank A', 'CHECKING', false))
+      const remove = vi.spyOn(balanceAccountsApi, 'remove').mockResolvedValue(undefined)
+
+      await user.click(screen.getByRole('button', { name: 'Contas' }))
+      const dialog = screen.getByRole('dialog', { name: 'Contas' })
+      await user.type(within(dialog).getByLabelText('Nome da conta'), 'Pot')
+      await user.selectOptions(within(dialog).getByLabelText('Entra em'), 'Guardado')
+      await user.click(within(dialog).getByRole('button', { name: 'Adicionar' }))
+      expect(create).toHaveBeenCalledWith({ name: 'Pot', kind: 'SAVINGS', active: true })
+
+      await user.click(await within(dialog).findByRole('button', { name: 'Desativar Bank A' }))
+      expect(update).toHaveBeenCalledWith(1, { name: 'Bank A', kind: 'CHECKING', active: false })
+      await user.click(within(dialog).getByRole('button', { name: 'Excluir Fund' }))
+      expect(remove).toHaveBeenCalledWith(3)
+    })
   })
 })

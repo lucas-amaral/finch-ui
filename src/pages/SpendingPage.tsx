@@ -3,7 +3,7 @@ import { cardSpendingApi, cardsApi } from '../api/endpoints'
 import type { CardSpendingYear, SpendingRow } from '../api/types'
 import { ErrorBanner, Loading, PageHeader, Stepper, Toggle } from '../components/ui'
 import { deviationOf } from '../lib/budget'
-import { MONTH_NAMES, currentYearMonth, formatGrowth, formatMoney, formatWhole } from '../lib/format'
+import { MONTH_NAMES, currentYearMonth, formatAmount, formatGrowth, formatMoney, formatWhole } from '../lib/format'
 import { useLoad } from '../lib/useLoad'
 import { useStoredFlag } from '../lib/useStoredFlag'
 
@@ -157,12 +157,12 @@ function Spending({ data, average, highlight, selected, onSelect }: SpendingProp
                     const deviation = highlight && monthRow.total !== 0 && deviationOf(value, slice.pick(average), HIGHLIGHT_THRESHOLD)
                     return (
                       <td key={month} className={[month === selected && 'selected', deviation].filter(Boolean).join(' ') || undefined}>
-                        {value === 0 ? '' : formatWhole(value)}
+                        {value === 0 ? '' : formatAmount(value)}
                       </td>
                     )
                   })}
-                  <td className="strong">{formatWhole(slice.pick(data.total))}</td>
-                  <td className="muted">{formatWhole(slice.pick(average))}</td>
+                  <td className="strong">{formatAmount(slice.pick(data.total))}</td>
+                  <td className="muted">{formatAmount(slice.pick(average))}</td>
                 </tr>
               ))}
             </tbody>
@@ -182,7 +182,7 @@ function Spending({ data, average, highlight, selected, onSelect }: SpendingProp
                       .join(' ') || undefined}
                   >
                     {changeFromPrevious > 0 ? '+' : ''}
-                    {changeFromPrevious === 0 ? '' : formatWhole(changeFromPrevious)}
+                    {changeFromPrevious === 0 ? '' : formatAmount(changeFromPrevious)}
                   </td>
                 ))}
                 <td />
@@ -272,11 +272,11 @@ function SummaryRow({ label, data, average, selected, pick }: SummaryRowProps) {
       <th scope="row">{label}</th>
       {data.months.map(({ month, spending }) => (
         <td key={month} className={month === selected ? 'selected' : undefined}>
-          {pick(spending) === 0 ? '' : formatWhole(pick(spending))}
+          {pick(spending) === 0 ? '' : formatAmount(pick(spending))}
         </td>
       ))}
-      <td>{formatWhole(pick(data.total))}</td>
-      <td>{formatWhole(pick(average))}</td>
+      <td>{formatAmount(pick(data.total))}</td>
+      <td>{formatAmount(pick(average))}</td>
     </tr>
   )
 }

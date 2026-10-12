@@ -355,6 +355,38 @@ describe('CardsPage', () => {
     expect(within(check).getByRole('status')).toHaveTextContent('Lançado a mais R$ 63,34')
   })
 
+  it('counts in the limit the closed invoice that is not due yet, and leaves out what is dated ahead', async () => {
+    vi.spyOn(cardsApi, 'list').mockResolvedValue([main])
+    // Today is 8 October: the gift is dated after it, so the bank has not charged it yet.
+    vi.spyOn(cardsApi, 'invoice').mockImplementation(async (cardId, month) => {
+      const invoice = invoiceOf(cardId, month)
+      invoice.groups[1].items[0].purchaseDate = '2026-10-20'
+      return invoice
+    })
+    // The September invoice closed with 500 and is only due on the 17th of October in this scenario.
+    vi.spyOn(cardsApi, 'invoices').mockImplementation(async (cardId, months) =>
+      months.map((month) => ({
+        ...emptyInvoice(cardId, month),
+        total: month === '2026-09' ? 500 : 0,
+        dueDate: month === '2026-09' ? '2026-10-17' : `${month}-17`,
+      })),
+    )
+    vi.spyOn(cardCategoriesApi, 'list').mockResolvedValue([])
+    renderPage(<CardsPage />)
+    const check = await screen.findByRole('region', { name: 'Conferência do limite' })
+    const user = userEvent.setup()
+
+    expect(within(check).getByText('Fatura de setembro de 2026, ainda não paga (vence 17/10)').nextSibling).toHaveTextContent('500,00')
+    expect(within(check).getByText('Fatura de outubro de 2026, já cobrado').nextSibling).toHaveTextContent('233,34')
+    expect(within(check).getByText(/Fora da conta: R\$\s30,00 de compras à vista desta fatura com data futura/)).toBeInTheDocument()
+    expect(within(check).getByText('Soma').nextSibling).toHaveTextContent('733,34')
+
+    // A few cents apart is how banks round installments, not a missing purchase.
+    await user.type(within(check).getByLabelText('Limite usado, no app do banco'), '73315')
+    expect(within(check).getByRole('status')).toHaveTextContent('Conferido, com R$ 0,19 de diferença')
+    expect(within(check).getByRole('status')).toHaveClass('check-ok')
+  })
+
   describe('recurring charges', () => {
     const gym: RecurringCharge = { id: 21, cardId: 1, categoryId: 2, description: 'Gym', amount: 139.9, chargeDay: 3, active: true }
 

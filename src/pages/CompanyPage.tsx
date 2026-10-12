@@ -70,7 +70,7 @@ export function CompanyPage() {
           />
           <section className="panel budget-card" aria-label="Meses">
             <div className="table-wrapper">
-              <table className="budget-table">
+              <table className="budget-table budget-table-wide">
                 <thead>
                   <tr>
                     <th>Mês</th>
