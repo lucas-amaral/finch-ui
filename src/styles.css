@@ -2084,3 +2084,73 @@ a.button {
   align-items: center;
   gap: 0.75rem;
 }
+
+/* ---------- a long table whose header stays in sight while the page scrolls ---------- */
+
+/* Sticky only works when no ancestor clips: this panel lets the table show through. */
+.sticky-panel {
+  overflow: visible;
+}
+
+/* Separate borders: with collapsed ones, a sticky cell leaves its borders behind and the rows show through. */
+.budget-table.sticky-head {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.budget-table.sticky-head thead th {
+  position: sticky;
+  top: 0;
+  left: auto;
+  /* Above the first column of the body, which is sticky too (sideways). */
+  z-index: 3;
+  box-sizing: border-box;
+  height: 2rem;
+  padding: 0 0.5rem;
+  background: var(--surface-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: var(--text);
+}
+
+/* The second header row parks right under the first. */
+.budget-table.sticky-head thead tr:nth-child(2) th {
+  top: 2rem;
+  border-bottom: 2px solid var(--border-strong);
+}
+
+.budget-table.sticky-head thead th[rowspan] {
+  border-bottom: 2px solid var(--border-strong);
+}
+
+.budget-table.sticky-head .head-group {
+  text-align: center;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.budget-table.sticky-head thead tr:first-child th:first-child {
+  border-top-left-radius: var(--radius-lg);
+}
+
+.budget-table.sticky-head thead tr:first-child th:last-child {
+  border-top-right-radius: var(--radius-lg);
+}
+
+.budget-table.sticky-head td,
+.budget-table.sticky-head tbody th {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.week-budgets {
+  margin-bottom: 0.9rem;
+}
+
+@media (max-width: 860px) {
+  .sticky-panel {
+    overflow-x: auto;
+  }
+}
