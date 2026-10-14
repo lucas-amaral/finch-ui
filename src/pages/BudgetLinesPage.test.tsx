@@ -15,6 +15,9 @@ const rent: BudgetLine = {
   active: true,
   forecastRule: 'SAME_MONTH_LAST_YEAR',
   nature: 'VARIABLE',
+  sessionPrice: null,
+  sessionWeekday: null,
+  sessionsFromPreviousMonth: true,
   sortOrder: 1,
 }
 const salary: BudgetLine = {
@@ -26,6 +29,9 @@ const salary: BudgetLine = {
   active: false,
   forecastRule: 'NONE',
   nature: 'VARIABLE',
+  sessionPrice: null,
+  sessionWeekday: null,
+  sessionsFromPreviousMonth: true,
   sortOrder: 1,
 }
 
@@ -37,6 +43,10 @@ async function renderLines(lines = [rent, salary]) {
   return { list, user: userEvent.setup() }
 }
 
+beforeEach(() => {
+  localStorage.clear()
+})
+
 describe('BudgetLinesPage', () => {
   it('lists bills and incomes with group, due day and situation', async () => {
     await renderLines()
@@ -47,9 +57,18 @@ describe('BudgetLinesPage', () => {
     expect(within(rentRow).getByText('Dia 5')).toBeInTheDocument()
     expect(within(rentRow).getByText('Mesmo mês do ano anterior')).toBeInTheDocument()
     expect(within(rentRow).getByText('Ativa')).toBeInTheDocument()
+  })
+
+  it('hides the inactive ones until asked, and remembers the choice', async () => {
+    const { user } = await renderLines()
+    expect(screen.queryByText('Salary')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Mostrar inativas (1)' }))
+
     const salaryRow = screen.getByText('Salary').closest('tr')!
     expect(within(salaryRow).getByText('Renda')).toBeInTheDocument()
     expect(within(salaryRow).getByText('Inativa')).toBeInTheDocument()
+    expect(localStorage.getItem('finch.settings.lines.inactive')).toBe('true')
   })
 
   it('creates a bill with what was typed and reloads the list', async () => {
@@ -73,9 +92,36 @@ describe('BudgetLinesPage', () => {
       active: true,
       forecastRule: 'SAME_MONTH_LAST_YEAR',
       nature: 'FIXED',
+      sessionPrice: null,
+      sessionWeekday: null,
+      sessionsFromPreviousMonth: true,
     })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('creates a bill charged per session, with its price and weekday', async () => {
+    const { user } = await renderLines()
+    const create = vi.spyOn(budgetLinesApi, 'create').mockResolvedValue({ ...rent, id: 3, name: 'Pilates' })
+
+    await user.click(screen.getByRole('button', { name: 'Nova conta' }))
+    const dialog = screen.getByRole('dialog', { name: 'Nova conta' })
+    await user.type(within(dialog).getByLabelText(/^Nome/), 'Pilates')
+    await user.selectOptions(within(dialog).getByLabelText(/^Previsão/), 'Por sessão: valor × sessões do mês, sem feriados')
+    await user.type(within(dialog).getByLabelText('Valor da sessão'), '7000')
+    await user.selectOptions(within(dialog).getByLabelText('Dia das sessões'), 'quarta')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ forecastRule: 'PER_SESSION', sessionPrice: 70, sessionWeekday: 3, sessionsFromPreviousMonth: true }),
+    )
+  })
+
+  it('shows a bill per session by its price and weekday', async () => {
+    await renderLines([{ ...rent, name: 'Pilates', forecastRule: 'PER_SESSION', sessionPrice: 70, sessionWeekday: 3 }])
+
+    const row = screen.getByText('Pilates').closest('tr')!
+    expect(within(row).getByText(/R\$\s70,00 por sessão, às quartas/)).toBeInTheDocument()
   })
 
   it('creates an income, with no group and no day when they are left empty', async () => {
@@ -97,6 +143,9 @@ describe('BudgetLinesPage', () => {
       active: true,
       forecastRule: 'LAST_VALUE',
       nature: 'VARIABLE',
+      sessionPrice: null,
+      sessionWeekday: null,
+      sessionsFromPreviousMonth: true,
     })
   })
 
@@ -119,6 +168,9 @@ describe('BudgetLinesPage', () => {
       active: false,
       forecastRule: 'SAME_MONTH_LAST_YEAR',
       nature: 'VARIABLE',
+      sessionPrice: null,
+      sessionWeekday: null,
+      sessionsFromPreviousMonth: true,
     })
   })
 

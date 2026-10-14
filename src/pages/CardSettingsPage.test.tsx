@@ -18,6 +18,9 @@ const line = (id: number, name: string, extra: Partial<BudgetLine> = {}): Budget
   active: true,
   forecastRule: 'LAST_VALUE',
   nature: 'VARIABLE',
+  sessionPrice: null,
+  sessionWeekday: null,
+  sessionsFromPreviousMonth: true,
   sortOrder: id,
   ...extra,
 })
@@ -35,7 +38,21 @@ async function renderSettings(cards = [main]) {
   return { list, user: userEvent.setup() }
 }
 
+beforeEach(() => {
+  localStorage.clear()
+})
+
 describe('CardSettingsPage', () => {
+  it('hides the inactive cards until asked', async () => {
+    const { user } = await renderSettings([main, { ...main, id: 2, name: 'Retired', active: false }])
+    const cards = screen.getByRole('region', { name: 'Cartões' })
+    expect(within(cards).queryByText('Retired')).not.toBeInTheDocument()
+
+    await user.click(within(cards).getByRole('button', { name: 'Mostrar inativos (1)' }))
+
+    expect(within(cards).getByText('Retired')).toBeInTheDocument()
+  })
+
   it('lists the cards with the bill they feed, and the categories', async () => {
     await renderSettings()
 

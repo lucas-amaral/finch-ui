@@ -4,6 +4,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 const TABS = [
   { to: '/settings/lines', label: 'Contas e rendas' },
   { to: '/settings/cards', label: 'Cartões e categorias' },
+  { to: '/settings/holidays', label: 'Feriados' },
   { to: '/settings/users', label: 'Usuários' },
   { to: '/settings/notifications', label: 'Avisos' },
 ]

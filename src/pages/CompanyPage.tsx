@@ -33,8 +33,9 @@ export function CompanyPage() {
   const byMonth = new Map((data?.company.months ?? []).map((month) => [month.month, month]))
   // The rules in force: the ones of the year, or the nearest earlier ones.
   const rules = data?.taxYears.filter((each) => each.year <= year).at(-1) ?? data?.taxYears[0]
+  // The numbers of the year are what happened: the projected months stay out of them.
   const sum = (field: 'revenue' | 'das' | 'inss' | 'irrf' | 'netProLabore') =>
-    (data?.company.months ?? []).reduce((total, month) => total + month[field], 0)
+    (data?.company.months ?? []).filter((month) => !month.projected).reduce((total, month) => total + month[field], 0)
 
   return (
     <>
@@ -181,12 +182,15 @@ function MonthRow({ name, month, current, onEdit }: MonthRowProps) {
   }
   const variation = month.exchangeVariation
   return (
-    <tr className={[current ? 'current-month' : '', month.estimated ? 'estimated' : ''].join(' ').trim() || undefined}>
+    <tr className={[current ? 'current-month' : '', month.estimated || month.projected ? 'estimated' : ''].join(' ').trim() || undefined}>
       {title}
       <td className="numeric amount">{formatAmount(month.invoiceUsd)}</td>
-      <td className="numeric amount" title={month.estimated ? 'Previsão: sem cotação própria, usa a última conhecida.' : undefined}>
+      <td
+        className="numeric amount"
+        title={month.projected ? 'Projeção: o dólar de hoje (PTAX), até a nota ter a cotação própria.' : month.estimated ? 'Previsão: sem cotação própria, usa a última conhecida.' : undefined}
+      >
         {formatExchangeRate(month.usedExchangeRate)}
-        {month.estimated && ' *'}
+        {(month.estimated || month.projected) && ' *'}
       </td>
       <td className="numeric total">{formatAmount(month.revenue)}</td>
       <td className="numeric amount">{formatAmount(month.grossProLabore)}</td>
@@ -578,7 +582,8 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
     <section className="company-focus" aria-label="Mês em foco">
       <div className="week-focus-head">
         <MonthStepper name={name} year={year} onPrevious={onPrevious} onNext={onNext} />
-        {data.estimated && <span className="chip chip-neutral">previsão</span>}
+        {data.projected && <span className="chip chip-neutral" title="Sem invoice ou sem a cotação própria: calculado com o dólar de hoje.">projeção com o dólar de hoje</span>}
+        {data.estimated && !data.projected && <span className="chip chip-neutral">previsão</span>}
         <button type="button" className="button push-left" onClick={() => setSummarizing(true)}>
           Resumo para a contabilidade
         </button>

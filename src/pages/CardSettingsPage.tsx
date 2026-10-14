@@ -5,8 +5,9 @@ import { Link } from 'react-router-dom'
 import { errorMessage, fieldErrors } from '../api/client'
 import { budgetLinesApi, cardCategoriesApi, cardsApi } from '../api/endpoints'
 import type { BudgetLine, CardCategory, CreditCard } from '../api/types'
-import { ErrorBanner, Field, IconButton, Loading, Modal, PageHeader } from '../components/ui'
+import { ErrorBanner, Field, IconButton, Loading, Modal, PageHeader, Toggle } from '../components/ui'
 import { useLoad } from '../lib/useLoad'
+import { useStoredFlag } from '../lib/useStoredFlag'
 
 /** `'new'` opens an empty form; an object opens it for editing. */
 type Editing<T> = T | 'new' | null
@@ -38,6 +39,8 @@ export function CardSettingsPage() {
 
   const data = loaded.data
   const billName = (id: number | null) => data?.bills.find((line) => line.id === id)?.name ?? '—'
+  const [showInactive, toggleInactive] = useStoredFlag('finch.settings.cards.inactive', false)
+  const inactiveCount = (data?.cards ?? []).filter((card) => !card.active).length
 
   return (
     <>
@@ -54,6 +57,11 @@ export function CardSettingsPage() {
           <section className="card list-card" aria-label="Cartões">
             <header className="list-header">
               <h2>Cartões</h2>
+              {inactiveCount > 0 && (
+                <Toggle pressed={showInactive} onClick={toggleInactive}>
+                  Mostrar inativos ({inactiveCount})
+                </Toggle>
+              )}
               <button type="button" className="button button-small" onClick={() => setEditingCard('new')}>
                 <Plus size={15} aria-hidden />
                 Novo cartão
@@ -74,7 +82,7 @@ export function CardSettingsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.cards.map((card) => (
+                  {data.cards.filter((card) => showInactive || card.active).map((card) => (
                     <tr key={card.id}>
                       <td className="strong">{card.name}</td>
                       <td className="muted">Dia {card.closingDay}</td>

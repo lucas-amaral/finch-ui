@@ -20,6 +20,7 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('link', { name: 'Cartões e categorias' })).toHaveClass('active')
     expect(screen.getByRole('link', { name: 'Usuários' })).toHaveAttribute('href', '/settings/users')
     expect(screen.getByRole('link', { name: 'Avisos' })).toHaveAttribute('href', '/settings/notifications')
+    expect(screen.getByRole('link', { name: 'Feriados' })).toHaveAttribute('href', '/settings/holidays')
     expect(screen.getByText('cards')).toBeInTheDocument()
   })
 })

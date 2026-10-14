@@ -5,9 +5,11 @@ import { Link } from 'react-router-dom'
 import { errorMessage, fieldErrors } from '../api/client'
 import { budgetLinesApi } from '../api/endpoints'
 import type { BudgetKind, BudgetLine, BudgetNature, ForecastRule } from '../api/types'
-import { ErrorBanner, Field, IconButton, Loading, Modal, PageHeader } from '../components/ui'
-import { FORECAST_LABELS, KIND_LABELS, NATURES, NATURE_HINTS, NATURE_LABELS } from '../lib/budget'
+import { ErrorBanner, Field, IconButton, Loading, Modal, PageHeader, Toggle } from '../components/ui'
+import { FORECAST_LABELS, KIND_LABELS, NATURES, NATURE_HINTS, NATURE_LABELS, WEEKDAYS, sessionSummary } from '../lib/budget'
+import { CurrencyInput } from '../components/CurrencyInput'
 import { useLoad } from '../lib/useLoad'
+import { useStoredFlag } from '../lib/useStoredFlag'
 
 /** The form is open for a new line of a kind, or for an existing line. */
 type Editing = { kind: BudgetKind; line: null } | { kind: BudgetKind; line: BudgetLine }
@@ -29,10 +31,16 @@ export function BudgetLinesPage() {
   }
 
   const groupNames = [...new Set((lines.data ?? []).flatMap((line) => line.groupName ?? []))]
+  const [showInactive, toggleInactive] = useStoredFlag('finch.settings.lines.inactive', false)
+  const inactiveCount = (lines.data ?? []).filter((line) => !line.active).length
+  const shown = (lines.data ?? []).filter((line) => showInactive || line.active)
 
   return (
     <>
       <PageHeader title="Contas e rendas" subtitle="O que entra como coluna na tela das contas do mês.">
+        <Toggle pressed={showInactive} onClick={toggleInactive} title="As inativas só aparecem nos anos em que têm valores.">
+          Mostrar inativas ({inactiveCount})
+        </Toggle>
         <Link to="/month" className="button">
           <ArrowLeft size={18} aria-hidden />
           Contas do mês
@@ -70,7 +78,7 @@ export function BudgetLinesPage() {
               </tr>
             </thead>
             <tbody>
-              {lines.data.map((line) => (
+              {shown.map((line) => (
                 <tr key={line.id}>
                   <td className="strong">{line.name}</td>
                   <td>
@@ -79,7 +87,9 @@ export function BudgetLinesPage() {
                   <td className="muted">{line.groupName ?? '—'}</td>
                   <td className="muted">{line.dueDay ? `Dia ${line.dueDay}` : '—'}</td>
                   <td className="muted">{line.kind === 'EXPENSE' ? NATURE_LABELS[line.nature] : '—'}</td>
-                  <td className="muted">{FORECAST_LABELS[line.forecastRule]}</td>
+                  <td className="muted">
+                    {line.forecastRule === 'PER_SESSION' ? sessionSummary(line.sessionPrice, line.sessionWeekday) : FORECAST_LABELS[line.forecastRule]}
+                  </td>
                   <td className="muted">{line.active ? 'Ativa' : 'Inativa'}</td>
                   <td className="row-actions">
                     <IconButton label={`Editar ${line.name}`} onClick={() => setEditing({ kind: line.kind, line })}>
@@ -125,6 +135,10 @@ function LineForm({ editing, groupNames, onClose, onSaved }: LineFormProps) {
   const [dueDay, setDueDay] = useState(line?.dueDay?.toString() ?? '')
   const [active, setActive] = useState(line?.active ?? true)
   const [forecastRule, setForecastRule] = useState<ForecastRule>(line?.forecastRule ?? 'LAST_VALUE')
+  const [sessionPrice, setSessionPrice] = useState(line?.sessionPrice?.toFixed(2) ?? '')
+  const [sessionWeekday, setSessionWeekday] = useState(line?.sessionWeekday?.toString() ?? '3')
+  const [fromPreviousMonth, setFromPreviousMonth] = useState(line?.sessionsFromPreviousMonth ?? true)
+  const perSession = forecastRule === 'PER_SESSION'
   const [nature, setNature] = useState<BudgetNature>(line?.nature ?? 'VARIABLE')
   const [error, setError] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -144,6 +158,9 @@ function LineForm({ editing, groupNames, onClose, onSaved }: LineFormProps) {
       active,
       forecastRule,
       nature,
+      sessionPrice: perSession && sessionPrice !== '' ? Number(sessionPrice) : null,
+      sessionWeekday: perSession ? Number(sessionWeekday) : null,
+      sessionsFromPreviousMonth: fromPreviousMonth,
     }
     try {
       if (line) await budgetLinesApi.update(line.id, input)
@@ -194,6 +211,32 @@ function LineForm({ editing, groupNames, onClose, onSaved }: LineFormProps) {
             ))}
           </select>
         </Field>
+        {perSession && (
+          <>
+            <div className="form-row">
+              <Field label="Valor da sessão" error={errors.sessionPrice}>
+                <CurrencyInput value={sessionPrice} onChange={setSessionPrice} required />
+              </Field>
+              <Field label="Dia das sessões">
+                <select value={sessionWeekday} onChange={(event) => setSessionWeekday(event.target.value)}>
+                  {WEEKDAYS.map((day, index) => (
+                    <option key={day} value={index + 1}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <label className="checkbox">
+              <input type="checkbox" checked={fromPreviousMonth} onChange={(event) => setFromPreviousMonth(event.target.checked)} />
+              O valor do mês paga as sessões do mês anterior
+            </label>
+            <p className="field-hint">
+              Feriados nacionais e os cadastrados em Cadastros → Feriados não contam. Ao salvar, os meses em aberto daqui até o fim do ano que
+              vem são recalculados; o que já foi pago fica como está.
+            </p>
+          </>
+        )}
         <label className="checkbox">
           <input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />
           Ativa

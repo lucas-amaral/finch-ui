@@ -25,6 +25,7 @@ const september = (year: number): CompanyMonth => ({
   taxesPaid: true,
   transferred: false,
   estimated: false,
+  projected: false,
   usedExchangeRate: 5.1999,
   revenue: 37439.28,
   grossProLabore: 8924,
@@ -47,6 +48,7 @@ const october = (year: number): CompanyMonth => ({
   receivedBrl: null,
   invoiceNumber: null,
   estimated: true,
+  projected: true,
   exchangeVariation: null,
 })
 
@@ -59,6 +61,9 @@ const line = (id: number, name: string, kind: BudgetLine['kind'], active = true)
   active,
   forecastRule: 'LAST_VALUE',
   nature: 'VARIABLE',
+  sessionPrice: null,
+  sessionWeekday: null,
+  sessionsFromPreviousMonth: true,
   sortOrder: id,
 })
 
@@ -113,14 +118,15 @@ describe('CompanyPage', () => {
     expect(within(screen.getByRole('row', { name: /^Janeiro/ })).getByText('sem invoice')).toBeInTheDocument()
   })
 
-  it('marks a month without its own rate as a forecast, and totals the year', async () => {
+  it('marks a projected month, and leaves it out of the numbers of the year', async () => {
     await renderCompany()
 
     const row = screen.getByRole('row', { name: /^Outubro/ })
     expect(row).toHaveClass('estimated', 'current-month')
-    expect(within(row).getByText('5,1999 *')).toBeInTheDocument()
-    expect(screen.getByText('Notas no ano').nextElementSibling).toHaveTextContent(/74\.878,56/)
-    expect(screen.getByText('INSS e IR no ano').nextElementSibling).toHaveTextContent(/4\.338,32/)
+    expect(within(row).getByText('5,1999 *')).toHaveAttribute('title', expect.stringContaining('o dólar de hoje'))
+    // Only September counts: October is a projection.
+    expect(screen.getByText('Notas no ano').nextElementSibling).toHaveTextContent(/37\.439,28/)
+    expect(screen.getByText('INSS e IR no ano').nextElementSibling).toHaveTextContent(/2\.169,16/)
   })
 
   it('registers the invoice of a month, fetching the dollar from the central bank', async () => {
@@ -231,7 +237,7 @@ describe('CompanyPage', () => {
     const focus = screen.getByRole('region', { name: 'Mês em foco' })
 
     expect(within(focus).getByText('Outubro 2026')).toBeInTheDocument()
-    expect(within(focus).getByText('previsão')).toBeInTheDocument()
+    expect(within(focus).getByText('projeção com o dólar de hoje')).toBeInTheDocument()
     const steps = within(focus).getAllByRole('listitem')
     expect(steps.map((step) => step.textContent)).toEqual([
       expect.stringContaining('Emitir a nota'),

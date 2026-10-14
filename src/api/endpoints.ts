@@ -27,6 +27,8 @@ import type {
   CreditCard,
   CreditCardInput,
   ImportPreviewLine,
+  LocalHoliday,
+  LocalHolidayInput,
   LoginResult,
   RecurringCharge,
   RecurringChargeInput,
@@ -62,6 +64,12 @@ export const budgetLinesApi = {
     request<BudgetEntry>('PUT', `/api/budget-lines/${lineId}/entries/${month}`, input),
   clearEntry: (lineId: number, month: string) =>
     request<void>('DELETE', `/api/budget-lines/${lineId}/entries/${month}`),
+}
+
+export const localHolidaysApi = {
+  list: () => request<LocalHoliday[]>('GET', '/api/local-holidays'),
+  create: (input: LocalHolidayInput) => request<LocalHoliday>('POST', '/api/local-holidays', input),
+  remove: (id: number) => request<void>('DELETE', `/api/local-holidays/${id}`),
 }
 
 export const budgetYearsApi = {

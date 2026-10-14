@@ -60,6 +60,43 @@ export function WeeklyPlanPage() {
       )}
       {data && (
         <>
+          <section className="panel budget-card sticky-panel" aria-label="Semanas">
+            <table className="budget-table budget-table-wide sticky-head">
+              <thead>
+                <tr>
+                  <th rowSpan={2}>Semana</th>
+                  <th colSpan={5} className="head-group">
+                    Total no cartão
+                  </th>
+                  <th rowSpan={2} className="numeric" title="O que foi gasto na semana fora das categorias de alimentação, sem as parcelas.">
+                    Sem alimentação
+                  </th>
+                  <th colSpan={3} className="head-group">
+                    Alimentação
+                  </th>
+                </tr>
+                <tr>
+                  <th className="numeric">Limite</th>
+                  <th className="numeric" title="Compras à vista feitas na semana.">
+                    À vista
+                  </th>
+                  <th className="numeric" title="A parte da semana nas parcelas do mês: parcelas do mês ÷ dias do mês × 7.">
+                    Parcelas
+                  </th>
+                  <th className="numeric">Gasto</th>
+                  <th className="numeric">Saldo</th>
+                  <th className="numeric">Limite</th>
+                  <th className="numeric">Gasto</th>
+                  <th className="numeric">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.plan.weeks.map((week) => (
+                  <WeekRow key={week.start} week={week} current={week.start <= today && today <= week.end} />
+                ))}
+              </tbody>
+            </table>
+          </section>
           <section className="panel list-card narrow-card week-budgets" aria-label="Orçamentos">
             <header className="list-header">
               <h2>Orçamentos</h2>
@@ -99,43 +136,6 @@ export function WeeklyPlanPage() {
                 </tbody>
               </table>
             )}
-          </section>
-          <section className="panel budget-card sticky-panel" aria-label="Semanas">
-            <table className="budget-table budget-table-wide sticky-head">
-              <thead>
-                <tr>
-                  <th rowSpan={2}>Semana</th>
-                  <th colSpan={5} className="head-group">
-                    Total no cartão
-                  </th>
-                  <th rowSpan={2} className="numeric" title="O que foi gasto na semana fora das categorias de alimentação, sem as parcelas.">
-                    Sem alimentação
-                  </th>
-                  <th colSpan={3} className="head-group">
-                    Alimentação
-                  </th>
-                </tr>
-                <tr>
-                  <th className="numeric">Limite</th>
-                  <th className="numeric" title="Compras à vista feitas na semana.">
-                    À vista
-                  </th>
-                  <th className="numeric" title="A parte da semana nas parcelas do mês: parcelas do mês ÷ dias do mês × 7.">
-                    Parcelas
-                  </th>
-                  <th className="numeric">Gasto</th>
-                  <th className="numeric">Saldo</th>
-                  <th className="numeric">Limite</th>
-                  <th className="numeric">Gasto</th>
-                  <th className="numeric">Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.plan.weeks.map((week) => (
-                  <WeekRow key={week.start} week={week} current={week.start <= today && today <= week.end} />
-                ))}
-              </tbody>
-            </table>
           </section>
         </>
       )}

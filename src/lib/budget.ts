@@ -8,7 +8,19 @@ export const SETTLED_LABELS: Record<BudgetKind, string> = { EXPENSE: 'Paga', INC
 export const FORECAST_LABELS: Record<ForecastRule, string> = {
   LAST_VALUE: 'Repetir o último valor',
   SAME_MONTH_LAST_YEAR: 'Mesmo mês do ano anterior',
+  PER_SESSION: 'Por sessão: valor × sessões do mês, sem feriados',
   NONE: 'Não prever',
+}
+
+/** ISO days of the week, as the server numbers them: 1 is Monday. */
+export const WEEKDAYS = ['segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo']
+
+/** "R$ 70,00 por sessão, às quartas": what a bill per session is, in a few words. */
+export function sessionSummary(price: number | null, weekday: number | null): string {
+  if (price === null || weekday === null) return FORECAST_LABELS.PER_SESSION
+  const day = WEEKDAYS[weekday - 1]
+  const plural = day.endsWith('o') ? `aos ${day}s` : `às ${day}s`
+  return `${price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} por sessão, ${plural}`
 }
 
 /** In the order the screens show them. The occasional bills are the ones summed up as "Extra". */

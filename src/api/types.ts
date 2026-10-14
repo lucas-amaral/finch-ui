@@ -25,7 +25,7 @@ export interface LoginResult {
 export type BudgetKind = 'EXPENSE' | 'INCOME'
 
 /** How the empty months ahead are filled in when forecasts are asked for. */
-export type ForecastRule = 'NONE' | 'LAST_VALUE' | 'SAME_MONTH_LAST_YEAR'
+export type ForecastRule = 'NONE' | 'LAST_VALUE' | 'SAME_MONTH_LAST_YEAR' | 'PER_SESSION'
 
 /** How the value of a bill behaves: the same every month, different every month, or only now and then. */
 export type BudgetNature = 'FIXED' | 'VARIABLE' | 'OCCASIONAL'
@@ -40,6 +40,12 @@ export interface BudgetLine {
   forecastRule: ForecastRule
   sortOrder: number
   nature: BudgetNature
+  /** For a bill charged per session (`PER_SESSION`): the price of one. */
+  sessionPrice: number | null
+  /** ISO day of the week of the sessions: 1 is Monday, 7 is Sunday. */
+  sessionWeekday: number | null
+  /** True when the value of a month pays the sessions of the month before. */
+  sessionsFromPreviousMonth: boolean
 }
 
 export interface BudgetLineInput {
@@ -50,6 +56,9 @@ export interface BudgetLineInput {
   active: boolean
   forecastRule: ForecastRule
   nature: BudgetNature
+  sessionPrice: number | null
+  sessionWeekday: number | null
+  sessionsFromPreviousMonth: boolean
 }
 
 export interface BudgetEntryInput {
@@ -62,7 +71,8 @@ export interface BudgetEntry extends BudgetEntryInput {
   lineId: number
 }
 
-export interface BudgetYearLine extends Omit<BudgetLine, 'sortOrder' | 'forecastRule'> {
+export interface BudgetYearLine
+  extends Omit<BudgetLine, 'sortOrder' | 'forecastRule' | 'sessionPrice' | 'sessionWeekday' | 'sessionsFromPreviousMonth'> {
   /** Average of the months that have a value; null when the year has none. */
   average: number | null
 }
@@ -296,6 +306,16 @@ export interface BudgetComparison {
 }
 
 /** How much money there was at each place in a month. */
+/** A state or city holiday, on the same day every year; the national ones are known by the server. */
+export interface LocalHoliday {
+  id: number
+  month: number
+  day: number
+  name: string
+}
+
+export type LocalHolidayInput = Omit<LocalHoliday, 'id'>
+
 export interface BalanceInput {
   checking: number
   savings: number
@@ -363,6 +383,8 @@ export interface CompanyMonth extends CompanyMonthInput {
   /** Ticked by hand once what was left of the month went to the owner's account. */
   transferred: boolean
   estimated: boolean
+  /** A month still ahead (no invoice yet, or one without its own dollar), worked out with the dollar of today. */
+  projected: boolean
   /** The rate the numbers were worked out with: the typed one, or the last known while estimated. */
   usedExchangeRate: number
   /** The invoice in reais. */
