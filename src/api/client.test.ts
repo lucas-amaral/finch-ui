@@ -1,4 +1,16 @@
-import { ApiError, errorMessage, fieldErrors, request, setSessionExpiredHandler, tokenStore } from './client'
+import {
+  ApiError,
+  RETRY_INTERVAL_MS,
+  RETRY_LIMIT_MS,
+  SLOW_NOTICE_MS,
+  errorMessage,
+  fieldErrors,
+  request,
+  resetWakingState,
+  setSessionExpiredHandler,
+  tokenStore,
+  wakingStore,
+} from './client'
 
 function respondWith(status: number, body?: unknown) {
   const fetchMock = vi.fn(async () => new Response(body === undefined ? null : JSON.stringify(body), { status }))
@@ -7,8 +19,10 @@ function respondWith(status: number, body?: unknown) {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   setSessionExpiredHandler(null)
+  resetWakingState()
 })
 
 describe('request', () => {
@@ -75,10 +89,74 @@ describe('request', () => {
     expect(onExpired).toHaveBeenCalledOnce()
   })
 
-  it('explains that the server may be waking up when the network call fails', async () => {
+  it('explains that the server may be waking up when it never answers', async () => {
+    vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
 
-    await expect(request('GET', '/api/users')).rejects.toThrow(/Não foi possível conectar ao servidor/)
+    const result = request('GET', '/api/users').catch((caught: unknown) => caught)
+    await vi.advanceTimersByTimeAsync(RETRY_LIMIT_MS)
+
+    expect(errorMessage(await result)).toMatch(/Não foi possível conectar ao servidor/)
+  })
+})
+
+describe('request while the server wakes up', () => {
+  const ok = () => new Response(JSON.stringify({ ok: true }), { status: 200 })
+  const asleep = () => new Response('<html>loading</html>', { status: 503 })
+
+  beforeEach(() => vi.useFakeTimers())
+
+  it('tries again until the server answers, showing the notice meanwhile', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(asleep())
+      .mockResolvedValueOnce(ok())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = request('GET', '/api/users')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wakingStore.getSnapshot()).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(2 * RETRY_INTERVAL_MS)
+    await expect(result).resolves.toEqual({ ok: true })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(wakingStore.getSnapshot()).toBe(false)
+  })
+
+  it('also retries a write while the server has not answered anything yet, like the login', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(ok())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = request('POST', '/api/auth/login', {})
+    await vi.advanceTimersByTimeAsync(RETRY_INTERVAL_MS)
+
+    await expect(result).resolves.toEqual({ ok: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not repeat a write once the server has answered, so nothing is saved twice', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(ok()).mockRejectedValue(new TypeError('Failed to fetch')))
+    await request('GET', '/api/users')
+
+    const fetchMock = vi.mocked(fetch)
+    await expect(request('POST', '/api/users', {})).rejects.toThrow(/Não foi possível conectar ao servidor/)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(wakingStore.getSnapshot()).toBe(false)
+  })
+
+  it('shows the notice for a call that is merely slow, and hides it when it ends', async () => {
+    let answer: (response: Response) => void = () => undefined
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => (answer = resolve))))
+
+    const result = request('GET', '/api/users')
+    await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS - 1)
+    expect(wakingStore.getSnapshot()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(wakingStore.getSnapshot()).toBe(true)
+
+    answer(ok())
+    await result
+    expect(wakingStore.getSnapshot()).toBe(false)
   })
 })
 

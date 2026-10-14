@@ -1,7 +1,7 @@
 import { HashRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { Layout } from './components/Layout'
-import { Loading } from './components/ui'
+import { Loading, WakingNotice } from './components/ui'
 import { BalancesPage } from './pages/BalancesPage'
 import { BudgetLinesPage } from './pages/BudgetLinesPage'
 import { CompanyPage } from './pages/CompanyPage'
@@ -38,6 +38,7 @@ function RequireAuth() {
 export default function App() {
   return (
     <AuthProvider>
+      <WakingNotice />
       <HashRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />

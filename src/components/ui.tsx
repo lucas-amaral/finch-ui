@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck, X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
+import { wakingStore } from '../api/client'
 
 export function ErrorBanner({ message, onRetry }: { message: string | null; onRetry?: () => void }) {
   if (!message) return null
@@ -22,6 +23,18 @@ export function SuccessBanner({ message }: { message: string }) {
     <div className="banner banner-success" role="status">
       <CircleCheck size={18} aria-hidden />
       <span>{message}</span>
+    </div>
+  )
+}
+
+/** Shown over any screen while a call waits for the back-end to wake up (the call retries by itself). */
+export function WakingNotice() {
+  const waking = useSyncExternalStore(wakingStore.subscribe, wakingStore.getSnapshot)
+  if (!waking) return null
+  return (
+    <div className="waking-notice" role="status">
+      <span className="waking-spinner" aria-hidden="true" />
+      Iniciando o sistema, isso pode levar alguns instantes…
     </div>
   )
 }
