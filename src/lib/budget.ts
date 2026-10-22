@@ -1,4 +1,4 @@
-import type { BudgetEntry, BudgetKind, BudgetMonth, BudgetNature, ForecastRule } from '../api/types'
+import type { BudgetEntry, BudgetKind, BudgetMonth, BudgetNature, ForecastRule, SessionFrequency } from '../api/types'
 
 export const KIND_LABELS: Record<BudgetKind, string> = { EXPENSE: 'Conta', INCOME: 'Renda' }
 
@@ -15,12 +15,13 @@ export const FORECAST_LABELS: Record<ForecastRule, string> = {
 /** ISO days of the week, as the server numbers them: 1 is Monday. */
 export const WEEKDAYS = ['segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo']
 
-/** "R$ 70,00 por sessão, às quartas": what a bill per session is, in a few words. */
-export function sessionSummary(price: number | null, weekday: number | null): string {
+/** "R$ 70,00 por sessão, às quartas" (", quinzenal" every other week): what a bill per session is, in a few words. */
+export function sessionSummary(price: number | null, weekday: number | null, frequency: SessionFrequency = 'WEEKLY'): string {
   if (price === null || weekday === null) return FORECAST_LABELS.PER_SESSION
   const day = WEEKDAYS[weekday - 1]
   const plural = day.endsWith('o') ? `aos ${day}s` : `às ${day}s`
-  return `${price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} por sessão, ${plural}`
+  const often = frequency === 'BIWEEKLY' ? ', quinzenal' : ''
+  return `${price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} por sessão, ${plural}${often}`
 }
 
 /** In the order the screens show them. The occasional bills are the ones summed up as "Extra". */

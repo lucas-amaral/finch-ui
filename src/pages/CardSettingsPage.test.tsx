@@ -21,6 +21,8 @@ const line = (id: number, name: string, extra: Partial<BudgetLine> = {}): Budget
   sessionPrice: null,
   sessionWeekday: null,
   sessionsFromPreviousMonth: true,
+  sessionFrequency: 'WEEKLY',
+  sessionReferenceDate: null,
   sortOrder: id,
   ...extra,
 })

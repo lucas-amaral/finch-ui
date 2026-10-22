@@ -3,13 +3,15 @@ import { Fragment, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { errorMessage, fieldErrors } from '../api/client'
-import { cardCategoriesApi, cardsApi, recurringChargesApi } from '../api/endpoints'
-import type { CardCategory, CardInvoice, CardPurchase, CreditCard, InvoiceItem, RecurringCharge } from '../api/types'
+import { budgetYearsApi, cardCategoriesApi, cardsApi, merchantsApi, recurringChargesApi } from '../api/endpoints'
+import type { CardCategory, CardInvoice, CardPurchase, CardPurchaseInput, CreditCard, InvoiceItem, Merchant, RecurringCharge } from '../api/types'
 import { CurrencyInput } from '../components/CurrencyInput'
 import { InvoiceImport } from '../components/InvoiceImport'
-import { ErrorBanner, Field, IconButton, Kpi, Loading, Modal, PageHeader } from '../components/ui'
+import { ErrorBanner, Field, IconButton, Kpi, Loading, Modal, PageHeader, Toggle } from '../components/ui'
 import { MONTH_NAMES, formatAmount, formatDayMonth, formatMoney, formatMonthLabel, shiftMonth, todayIso } from '../lib/format'
+import { closingDateOf, dueDateOf, invoiceMonthOf } from '../lib/cardInvoice'
 import { CENTS_TOLERANCE, limitCheck } from '../lib/limitCheck'
+import { findMerchant } from '../lib/merchants'
 import { useLoad } from '../lib/useLoad'
 
 /** The purchase form is open for a new purchase, or for the one with this id. */
@@ -122,9 +124,9 @@ export function CardsPage() {
           card={card}
           purchaseId={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null)
-            setVersion(version + 1)
+          onSaved={(keepOpen) => {
+            if (!keepOpen) setEditing(null)
+            setVersion((current) => current + 1)
           }}
         />
       )}
@@ -471,7 +473,8 @@ interface PurchaseFormProps {
   /** Null when creating. */
   purchaseId: number | null
   onClose: () => void
-  onSaved: () => void
+  /** `keepOpen` after "Salvar e nova": the invoice reloads behind the form, which stays for the next purchase. */
+  onSaved: (keepOpen: boolean) => void
 }
 
 function PurchaseForm({ card, purchaseId, onClose, onSaved }: PurchaseFormProps) {
@@ -479,16 +482,33 @@ function PurchaseForm({ card, purchaseId, onClose, onSaved }: PurchaseFormProps)
   const loaded = useLoad(
     async () => ({
       categories: await cardCategoriesApi.list(),
+      // Without the merchants the form still works; it only does not suggest the category.
+      merchants: await merchantsApi.list().catch(() => [] as Merchant[]),
       purchase: purchaseId === null ? null : await cardsApi.getPurchase(card.id, purchaseId),
     }),
     [],
   )
+  /** Each "Salvar e nova" starts a blank form again, keeping the date of the last purchase. */
+  const [round, setRound] = useState<{ count: number; date?: string; saved?: string }>({ count: 0 })
   const title = purchaseId === null ? `Nova compra · ${card.name}` : `Editar compra · ${card.name}`
 
   return (
     <Modal title={title} onClose={onClose}>
       {loaded.data ? (
-        <PurchaseFields card={card} purchase={loaded.data.purchase} categories={loaded.data.categories} onClose={onClose} onSaved={onSaved} />
+        <PurchaseFields
+          key={round.count}
+          card={card}
+          purchase={loaded.data.purchase}
+          categories={loaded.data.categories}
+          merchants={loaded.data.merchants}
+          initialDate={round.date}
+          savedMessage={round.saved}
+          onClose={onClose}
+          onSaved={(saved, keepOpen) => {
+            onSaved(keepOpen)
+            if (keepOpen) setRound({ count: round.count + 1, date: saved.purchaseDate, saved: `"${saved.description}" lançada.` })
+          }}
+        />
       ) : (
         <div className="form">{loaded.error ? <ErrorBanner message={loaded.error} onRetry={loaded.reload} /> : <Loading />}</div>
       )}
@@ -500,46 +520,89 @@ interface PurchaseFieldsProps {
   card: CreditCard
   purchase: CardPurchase | null
   categories: CardCategory[]
+  merchants: Merchant[]
+  /** The date a new purchase starts with (the last one's, after "Salvar e nova"); today otherwise. */
+  initialDate?: string
+  savedMessage?: string
   onClose: () => void
-  onSaved: () => void
+  onSaved: (saved: CardPurchaseInput, keepOpen: boolean) => void
 }
 
-function PurchaseFields({ card, purchase, categories, onClose, onSaved }: PurchaseFieldsProps) {
+function PurchaseFields({ card, purchase, categories, merchants, initialDate, savedMessage, onClose, onSaved }: PurchaseFieldsProps) {
   const [description, setDescription] = useState(purchase?.description ?? '')
-  const [purchaseDate, setPurchaseDate] = useState(purchase?.purchaseDate ?? todayIso())
+  const [purchaseDate, setPurchaseDate] = useState(purchase?.purchaseDate ?? initialDate ?? todayIso())
   const [amount, setAmount] = useState(purchase ? Math.abs(purchase.amount).toFixed(2) : '')
   const [refund, setRefund] = useState(purchase ? purchase.amount < 0 : false)
-  const [installments, setInstallments] = useState(String(purchase?.installments ?? 1))
-  const [firstNumber, setFirstNumber] = useState(String(purchase?.firstInstallmentNumber ?? 1))
-  // Empty means "the purchase goes to the end of its plan", which is the usual case.
-  const underWay = purchase !== null && purchase.totalInstallments !== purchase.firstInstallmentNumber + purchase.installments - 1
-  const [totalInstallments, setTotalInstallments] = useState(underWay ? String(purchase.totalInstallments) : '')
+  const [split, setSplit] = useState(purchase ? purchase.totalInstallments > 1 : false)
+  const [installmentNumber, setInstallmentNumber] = useState(String(purchase?.firstInstallmentNumber ?? 1))
+  const [totalInstallments, setTotalInstallments] = useState(purchase && purchase.totalInstallments > 1 ? String(purchase.totalInstallments) : '')
   const [categoryId, setCategoryId] = useState(purchase?.categoryId?.toString() ?? '')
+  // Once the user picks a category, the merchant no longer changes it.
+  const [categoryChosen, setCategoryChosen] = useState(purchase !== null)
   // An existing purchase keeps its invoice unless the user clears the field to let the date decide again.
   const [firstInvoiceMonth, setFirstInvoiceMonth] = useState(purchase?.firstInvoiceMonth ?? '')
+  const [choosingInvoice, setChoosingInvoice] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
 
-  async function submit(event: FormEvent) {
+  const merchant = description.trim() ? findMerchant(description, merchants) : undefined
+  const suggested = merchant && !categoryChosen && categoryId === String(merchant.categoryId)
+  const invoiceMonth = firstInvoiceMonth || (purchaseDate ? invoiceMonthOf(card, purchaseDate) : '')
+
+  function describe(value: string) {
+    setDescription(value)
+    const found = value.trim() ? findMerchant(value, merchants) : undefined
+    if (!categoryChosen) setCategoryId(found ? String(found.categoryId) : '')
+  }
+
+  /** The plan as the server takes it: how many charges this record puts on the invoices, from which one, of how many. */
+  function plan(): Pick<CardPurchaseInput, 'installments' | 'firstInstallmentNumber' | 'totalInstallments'> | string {
+    if (!split) return { installments: 1, firstInstallmentNumber: 1, totalInstallments: null }
+    const number = Number(installmentNumber)
+    const total = Number(totalInstallments)
+    if (!Number.isInteger(total) || total < 2) return 'Uma compra parcelada tem pelo menos 2 parcelas.'
+    if (!Number.isInteger(number) || number < 1 || number > total) return `A parcela deve estar entre 1 e ${total}.`
+    // A purchase registered without its last installments (the history of the spreadsheet) keeps them out while its plan is not changed.
+    const unchanged = purchase && purchase.firstInstallmentNumber === number && purchase.totalInstallments === total
+    return { installments: unchanged ? purchase.installments : total - number + 1, firstInstallmentNumber: number, totalInstallments: total }
+  }
+
+  /** Asks before putting a purchase on an invoice that already closed and was paid. */
+  async function confirmInvoice(): Promise<boolean> {
+    if (!invoiceMonth || (purchase && invoiceMonth === purchase.firstInvoiceMonth)) return true
+    const today = todayIso()
+    if (today < closingDateOf(card, invoiceMonth)) return true
+    if (!(await invoicePaid(card, invoiceMonth, today))) return true
+    return window.confirm(`A fatura de ${formatMonthLabel(invoiceMonth)} já fechou e foi paga. Lançar a compra nela mesmo assim?`)
+  }
+
+  async function submit(event: FormEvent, keepOpen = false) {
     event.preventDefault()
+    const planned = plan()
+    if (typeof planned === 'string') {
+      setErrors({ installments: planned })
+      return
+    }
     setSubmitting(true)
     setError(null)
     setErrors({})
-    const input = {
+    const input: CardPurchaseInput = {
       description,
       purchaseDate,
       amount: Number(amount) * (refund ? -1 : 1),
-      installments: Number(installments),
-      firstInstallmentNumber: Number(firstNumber),
-      totalInstallments: totalInstallments ? Number(totalInstallments) : null,
+      ...planned,
       categoryId: categoryId ? Number(categoryId) : null,
       firstInvoiceMonth: firstInvoiceMonth || null,
     }
     try {
+      if (!(await confirmInvoice())) {
+        setSubmitting(false)
+        return
+      }
       if (purchase) await cardsApi.updatePurchase(card.id, purchase.id, input)
       else await cardsApi.createPurchase(card.id, input)
-      onSaved()
+      onSaved(input, keepOpen)
     } catch (caught) {
       setError(errorMessage(caught))
       setErrors(fieldErrors(caught))
@@ -548,64 +611,113 @@ function PurchaseFields({ card, purchase, categories, onClose, onSaved }: Purcha
   }
 
   return (
-    <form className="form" onSubmit={submit}>
+    <form className="form" onSubmit={(event) => submit(event)}>
+      {savedMessage && (
+        <p className="muted" role="status">
+          {savedMessage} Pode lançar a próxima.
+        </p>
+      )}
       <ErrorBanner message={error} />
       <Field label="Descrição" error={errors.description}>
-        <input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={120} required autoFocus />
+        <input value={description} onChange={(event) => describe(event.target.value)} maxLength={120} required autoFocus />
       </Field>
       <div className="form-row">
         <Field label="Data da compra" error={errors.purchaseDate}>
           <input type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} required />
         </Field>
-        <Field label="Valor total" error={errors.amount} hint="A soma das parcelas lançadas.">
+        <Field
+          label="Valor total"
+          error={errors.amount}
+          hint={split && Number(installmentNumber) > 1 ? 'A soma das parcelas daqui até a última.' : undefined}
+        >
           <CurrencyInput value={amount} onChange={setAmount} required />
         </Field>
       </div>
-      <div className="form-row">
-        <Field label="Parcelas" error={errors.installments}>
-          <input type="number" value={installments} onChange={(event) => setInstallments(event.target.value)} min={1} max={48} required />
-        </Field>
-        <Field label="Categoria" error={errors.categoryId}>
-          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-            <option value="">Sem categoria</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-      <div className="form-row">
-        <Field label="Começa na parcela" error={errors.firstInstallmentNumber} hint="Acima de 1 se a compra já estava em andamento.">
-          <input type="number" value={firstNumber} onChange={(event) => setFirstNumber(event.target.value)} min={1} max={48} required />
-        </Field>
-        <Field label="Total de parcelas" error={errors.totalInstallments} hint="Em branco, termina na última lançada.">
-          <input type="number" value={totalInstallments} onChange={(event) => setTotalInstallments(event.target.value)} min={1} max={48} />
-        </Field>
-      </div>
-      <Field
-        label="Primeira fatura"
-        error={errors.firstInvoiceMonth}
-        hint={`Em branco, vale a data da compra: do dia ${card.closingDay} em diante, a compra cai na fatura seguinte.`}
-      >
-        <input type="month" value={firstInvoiceMonth} onChange={(event) => setFirstInvoiceMonth(event.target.value)} />
+      <Field label="Categoria" error={errors.categoryId} hint={suggested ? `Sugerida pelo estabelecimento ${merchant.name}.` : undefined}>
+        <select
+          value={categoryId}
+          onChange={(event) => {
+            setCategoryId(event.target.value)
+            setCategoryChosen(true)
+          }}
+        >
+          <option value="">Sem categoria</option>
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+            </option>
+          ))}
+        </select>
       </Field>
-      <label className="checkbox">
-        <input type="checkbox" checked={refund} onChange={(event) => setRefund(event.target.checked)} />
-        É um estorno
-        <span className="muted"> — entra como crédito na fatura</span>
-      </label>
+      <div className="form-inline">
+        <Toggle pressed={split} onClick={() => setSplit(!split)}>
+          Parcelado
+        </Toggle>
+        <label className="checkbox">
+          <input type="checkbox" checked={refund} onChange={(event) => setRefund(event.target.checked)} />
+          É um estorno
+          <span className="muted"> — entra como crédito na fatura</span>
+        </label>
+      </div>
+      {split && (
+        <div className="form-row">
+          <Field label="Parcela número" error={errors.installments} hint="Acima de 1 se a compra já estava em andamento.">
+            <input type="number" value={installmentNumber} onChange={(event) => setInstallmentNumber(event.target.value)} min={1} max={48} required />
+          </Field>
+          <Field label="Total de parcelas" error={errors.totalInstallments}>
+            <input type="number" value={totalInstallments} onChange={(event) => setTotalInstallments(event.target.value)} min={2} max={48} required />
+          </Field>
+        </div>
+      )}
+      {split || choosingInvoice || firstInvoiceMonth ? (
+        <Field
+          label={split ? 'Primeira fatura' : 'Fatura'}
+          error={errors.firstInvoiceMonth}
+          hint={`Em branco, vale a data da compra: do dia ${card.closingDay} em diante, a compra cai na fatura seguinte.`}
+        >
+          <input type="month" value={firstInvoiceMonth} onChange={(event) => setFirstInvoiceMonth(event.target.value)} />
+        </Field>
+      ) : (
+        invoiceMonth && (
+          <p className="field-hint">
+            Entra na fatura de {formatMonthLabel(invoiceMonth)}.{' '}
+            <button type="button" className="link-button" onClick={() => setChoosingInvoice(true)}>
+              Escolher outra fatura
+            </button>
+          </p>
+        )
+      )}
       <div className="form-actions">
         <button type="button" className="button" onClick={onClose}>
           Cancelar
         </button>
+        {!purchase && (
+          <button type="button" className="button" disabled={submitting} onClick={(event) => submit(event, true)}>
+            Salvar e nova
+          </button>
+        )}
         <button type="submit" className="button button-primary" disabled={submitting}>
           Salvar
         </button>
       </div>
     </form>
   )
+}
+
+/**
+ * Whether the invoice was paid: the bill it feeds is marked as paid in the month, or, for a card that
+ * feeds no bill, its due date has passed. When the budget cannot be read, the due date decides too.
+ */
+async function invoicePaid(card: CreditCard, invoiceMonth: string, today: string): Promise<boolean> {
+  const dueDatePassed = today > dueDateOf(card, invoiceMonth)
+  if (card.budgetLineId === null) return dueDatePassed
+  try {
+    const [year, month] = invoiceMonth.split('-').map(Number)
+    const budget = await budgetYearsApi.get(year)
+    return budget.months[month - 1]?.entries.some((entry) => entry.lineId === card.budgetLineId && entry.settled) ?? false
+  } catch {
+    return dueDatePassed
+  }
 }
 
 interface RecurringManagerProps {

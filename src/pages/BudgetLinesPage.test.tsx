@@ -18,6 +18,8 @@ const rent: BudgetLine = {
   sessionPrice: null,
   sessionWeekday: null,
   sessionsFromPreviousMonth: true,
+  sessionFrequency: 'WEEKLY',
+  sessionReferenceDate: null,
   sortOrder: 1,
 }
 const salary: BudgetLine = {
@@ -32,6 +34,8 @@ const salary: BudgetLine = {
   sessionPrice: null,
   sessionWeekday: null,
   sessionsFromPreviousMonth: true,
+  sessionFrequency: 'WEEKLY',
+  sessionReferenceDate: null,
   sortOrder: 1,
 }
 
@@ -95,6 +99,8 @@ describe('BudgetLinesPage', () => {
       sessionPrice: null,
       sessionWeekday: null,
       sessionsFromPreviousMonth: true,
+      sessionFrequency: 'WEEKLY',
+      sessionReferenceDate: null,
     })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(list).toHaveBeenCalledTimes(2)
@@ -115,6 +121,35 @@ describe('BudgetLinesPage', () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ forecastRule: 'PER_SESSION', sessionPrice: 70, sessionWeekday: 3, sessionsFromPreviousMonth: true }),
     )
+  })
+
+  it('creates a bill with sessions every other week, from the date of one of them', async () => {
+    const { user } = await renderLines()
+    const create = vi.spyOn(budgetLinesApi, 'create').mockResolvedValue({ ...rent, id: 3, name: 'Therapy' })
+
+    await user.click(screen.getByRole('button', { name: 'Nova conta' }))
+    const dialog = screen.getByRole('dialog', { name: 'Nova conta' })
+    await user.type(within(dialog).getByLabelText(/^Nome/), 'Therapy')
+    await user.selectOptions(within(dialog).getByLabelText(/^Previsão/), 'Por sessão: valor × sessões do mês, sem feriados')
+    await user.type(within(dialog).getByLabelText('Valor da sessão'), '18000')
+    await user.selectOptions(within(dialog).getByLabelText('Dia das sessões'), 'terça')
+    expect(within(dialog).queryByLabelText(/^Data de uma sessão/)).not.toBeInTheDocument()
+    await user.selectOptions(within(dialog).getByLabelText('Frequência'), 'Quinzenal (semana sim, semana não)')
+    await user.type(within(dialog).getByLabelText(/^Data de uma sessão/), '2026-10-06')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionPrice: 180, sessionWeekday: 2, sessionFrequency: 'BIWEEKLY', sessionReferenceDate: '2026-10-06' }),
+    )
+  })
+
+  it('shows a bill per session every other week as such', async () => {
+    await renderLines([
+      { ...rent, name: 'Therapy', forecastRule: 'PER_SESSION', sessionPrice: 180, sessionWeekday: 2, sessionFrequency: 'BIWEEKLY', sessionReferenceDate: '2026-10-06' },
+    ])
+
+    const row = screen.getByText('Therapy').closest('tr')!
+    expect(within(row).getByText(/R\$\s180,00 por sessão, às terças, quinzenal/)).toBeInTheDocument()
   })
 
   it('shows a bill per session by its price and weekday', async () => {
@@ -146,6 +181,8 @@ describe('BudgetLinesPage', () => {
       sessionPrice: null,
       sessionWeekday: null,
       sessionsFromPreviousMonth: true,
+      sessionFrequency: 'WEEKLY',
+      sessionReferenceDate: null,
     })
   })
 
@@ -171,6 +208,8 @@ describe('BudgetLinesPage', () => {
       sessionPrice: null,
       sessionWeekday: null,
       sessionsFromPreviousMonth: true,
+      sessionFrequency: 'WEEKLY',
+      sessionReferenceDate: null,
     })
   })
 

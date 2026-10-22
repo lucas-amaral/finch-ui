@@ -4,7 +4,7 @@ import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { errorMessage, fieldErrors } from '../api/client'
 import { budgetLinesApi } from '../api/endpoints'
-import type { BudgetKind, BudgetLine, BudgetNature, ForecastRule } from '../api/types'
+import type { BudgetKind, BudgetLine, BudgetNature, ForecastRule, SessionFrequency } from '../api/types'
 import { ErrorBanner, Field, IconButton, Loading, Modal, PageHeader, Toggle } from '../components/ui'
 import { FORECAST_LABELS, KIND_LABELS, NATURES, NATURE_HINTS, NATURE_LABELS, WEEKDAYS, sessionSummary } from '../lib/budget'
 import { CurrencyInput } from '../components/CurrencyInput'
@@ -88,7 +88,7 @@ export function BudgetLinesPage() {
                   <td className="muted">{line.dueDay ? `Dia ${line.dueDay}` : '—'}</td>
                   <td className="muted">{line.kind === 'EXPENSE' ? NATURE_LABELS[line.nature] : '—'}</td>
                   <td className="muted">
-                    {line.forecastRule === 'PER_SESSION' ? sessionSummary(line.sessionPrice, line.sessionWeekday) : FORECAST_LABELS[line.forecastRule]}
+                    {line.forecastRule === 'PER_SESSION' ? sessionSummary(line.sessionPrice, line.sessionWeekday, line.sessionFrequency) : FORECAST_LABELS[line.forecastRule]}
                   </td>
                   <td className="muted">{line.active ? 'Ativa' : 'Inativa'}</td>
                   <td className="row-actions">
@@ -138,6 +138,8 @@ function LineForm({ editing, groupNames, onClose, onSaved }: LineFormProps) {
   const [sessionPrice, setSessionPrice] = useState(line?.sessionPrice?.toFixed(2) ?? '')
   const [sessionWeekday, setSessionWeekday] = useState(line?.sessionWeekday?.toString() ?? '3')
   const [fromPreviousMonth, setFromPreviousMonth] = useState(line?.sessionsFromPreviousMonth ?? true)
+  const [sessionFrequency, setSessionFrequency] = useState<SessionFrequency>(line?.sessionFrequency ?? 'WEEKLY')
+  const [referenceDate, setReferenceDate] = useState(line?.sessionReferenceDate ?? '')
   const perSession = forecastRule === 'PER_SESSION'
   const [nature, setNature] = useState<BudgetNature>(line?.nature ?? 'VARIABLE')
   const [error, setError] = useState<string | null>(null)
@@ -161,6 +163,8 @@ function LineForm({ editing, groupNames, onClose, onSaved }: LineFormProps) {
       sessionPrice: perSession && sessionPrice !== '' ? Number(sessionPrice) : null,
       sessionWeekday: perSession ? Number(sessionWeekday) : null,
       sessionsFromPreviousMonth: fromPreviousMonth,
+      sessionFrequency: perSession ? sessionFrequency : 'WEEKLY',
+      sessionReferenceDate: perSession && sessionFrequency === 'BIWEEKLY' && referenceDate ? referenceDate : null,
     }
     try {
       if (line) await budgetLinesApi.update(line.id, input)
@@ -226,6 +230,19 @@ function LineForm({ editing, groupNames, onClose, onSaved }: LineFormProps) {
                   ))}
                 </select>
               </Field>
+            </div>
+            <div className="form-row">
+              <Field label="Frequência">
+                <select value={sessionFrequency} onChange={(event) => setSessionFrequency(event.target.value as SessionFrequency)}>
+                  <option value="WEEKLY">Toda semana</option>
+                  <option value="BIWEEKLY">Quinzenal (semana sim, semana não)</option>
+                </select>
+              </Field>
+              {sessionFrequency === 'BIWEEKLY' && (
+                <Field label="Data de uma sessão" error={errors.sessionReferenceDate} hint="Qualquer uma, passada ou futura: marca as semanas que têm sessão.">
+                  <input type="date" value={referenceDate} onChange={(event) => setReferenceDate(event.target.value)} required />
+                </Field>
+              )}
             </div>
             <label className="checkbox">
               <input type="checkbox" checked={fromPreviousMonth} onChange={(event) => setFromPreviousMonth(event.target.checked)} />

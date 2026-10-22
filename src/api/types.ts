@@ -30,6 +30,9 @@ export type ForecastRule = 'NONE' | 'LAST_VALUE' | 'SAME_MONTH_LAST_YEAR' | 'PER
 /** How the value of a bill behaves: the same every month, different every month, or only now and then. */
 export type BudgetNature = 'FIXED' | 'VARIABLE' | 'OCCASIONAL'
 
+/** How often a bill per session has a session: every week, or every other week. */
+export type SessionFrequency = 'WEEKLY' | 'BIWEEKLY'
+
 export interface BudgetLine {
   id: number
   name: string
@@ -46,6 +49,9 @@ export interface BudgetLine {
   sessionWeekday: number | null
   /** True when the value of a month pays the sessions of the month before. */
   sessionsFromPreviousMonth: boolean
+  sessionFrequency: SessionFrequency
+  /** `yyyy-MM-dd` of one session, for sessions every other week: it fixes which weeks have one. */
+  sessionReferenceDate: string | null
 }
 
 export interface BudgetLineInput {
@@ -59,6 +65,8 @@ export interface BudgetLineInput {
   sessionPrice: number | null
   sessionWeekday: number | null
   sessionsFromPreviousMonth: boolean
+  sessionFrequency: SessionFrequency
+  sessionReferenceDate: string | null
 }
 
 export interface BudgetEntryInput {
@@ -72,7 +80,10 @@ export interface BudgetEntry extends BudgetEntryInput {
 }
 
 export interface BudgetYearLine
-  extends Omit<BudgetLine, 'sortOrder' | 'forecastRule' | 'sessionPrice' | 'sessionWeekday' | 'sessionsFromPreviousMonth'> {
+  extends Omit<
+    BudgetLine,
+    'sortOrder' | 'forecastRule' | 'sessionPrice' | 'sessionWeekday' | 'sessionsFromPreviousMonth' | 'sessionFrequency' | 'sessionReferenceDate'
+  > {
   /** Average of the months that have a value; null when the year has none. */
   average: number | null
 }
@@ -450,4 +461,22 @@ export interface TaxYear {
   inssCeiling: number
   dependentDeduction: number
   irrfBrackets: TaxBracket[]
+}
+
+/** A shop or service, and the category its purchases get: it suggests the category as a purchase is typed. */
+export interface Merchant {
+  id: number
+  name: string
+  categoryId: number
+}
+
+export type MerchantInput = Omit<Merchant, 'id'>
+
+/** Purchases of the last three years with the same description that no merchant recognizes yet. */
+export interface MerchantSuggestion {
+  /** The description as it was typed most often, without the installment. */
+  name: string
+  /** The category those purchases got most; null when none had one. */
+  categoryId: number | null
+  purchases: number
 }

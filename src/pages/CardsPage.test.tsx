@@ -1,8 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '../api/client'
-import { cardCategoriesApi, cardsApi, recurringChargesApi } from '../api/endpoints'
-import type { CardInvoice, CardPurchase, CreditCard, RecurringCharge } from '../api/types'
+import { budgetYearsApi, cardCategoriesApi, cardsApi, merchantsApi, recurringChargesApi } from '../api/endpoints'
+import type { BudgetYear, CardInvoice, CardPurchase, CreditCard, Merchant, RecurringCharge } from '../api/types'
 import { renderPage } from '../test/render'
 import { CardsPage } from './CardsPage'
 
@@ -51,7 +51,8 @@ const emptyInvoice = (cardId: number, month: string): CardInvoice => ({
   groups: [],
 })
 
-async function renderCards(cards = [main, second, retired]) {
+async function renderCards(cards = [main, second, retired], merchants: Merchant[] = []) {
+  vi.spyOn(merchantsApi, 'list').mockResolvedValue(merchants)
   vi.spyOn(cardsApi, 'list').mockResolvedValue(cards)
   const invoice = vi.spyOn(cardsApi, 'invoice').mockImplementation(async (cardId, month) => invoiceOf(cardId, month))
   // The invoices around the one on screen: each month ahead still carries 100 of installments.
@@ -132,9 +133,11 @@ describe('CardsPage', () => {
     await user.type(await within(dialog).findByLabelText(/^Descrição/), 'Bookshop')
     expect(within(dialog).getByLabelText(/^Data da compra/)).toHaveValue('2026-10-08')
     await user.type(within(dialog).getByLabelText(/^Valor total/), '9990')
-    await user.clear(within(dialog).getByLabelText(/^Parcelas/))
-    await user.type(within(dialog).getByLabelText(/^Parcelas/), '3')
     await user.selectOptions(within(dialog).getByLabelText(/^Categoria/), 'Gasolina')
+    expect(within(dialog).queryByLabelText(/^Total de parcelas/)).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Parcelado' }))
+    expect(within(dialog).getByLabelText(/^Parcela número/)).toHaveValue(1)
+    await user.type(within(dialog).getByLabelText(/^Total de parcelas/), '3')
     await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
 
     expect(create).toHaveBeenCalledWith(1, {
@@ -143,7 +146,7 @@ describe('CardsPage', () => {
       amount: 99.9,
       installments: 3,
       firstInstallmentNumber: 1,
-      totalInstallments: null,
+      totalInstallments: 3,
       categoryId: 2,
       firstInvoiceMonth: null,
     })
@@ -184,8 +187,11 @@ describe('CardsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Editar Flight' }))
     const dialog = await screen.findByRole('dialog', { name: 'Editar compra · Main' })
     expect(await within(dialog).findByLabelText(/^Valor total/)).toHaveValue('400,00')
-    expect(within(dialog).getByLabelText(/^Parcelas/)).toHaveValue(3)
+    expect(within(dialog).getByRole('button', { name: 'Parcelado' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByLabelText(/^Parcela número/)).toHaveValue(1)
+    expect(within(dialog).getByLabelText(/^Total de parcelas/)).toHaveValue(3)
     expect(within(dialog).getByLabelText(/^Primeira fatura/)).toHaveValue('2026-09')
+    expect(within(dialog).queryByRole('button', { name: 'Salvar e nova' })).not.toBeInTheDocument()
     await user.clear(within(dialog).getByLabelText(/^Descrição/))
     await user.type(within(dialog).getByLabelText(/^Descrição/), 'Flight home')
     await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
@@ -196,7 +202,7 @@ describe('CardsPage', () => {
       amount: 400,
       installments: 3,
       firstInstallmentNumber: 1,
-      totalInstallments: null,
+      totalInstallments: 3,
       categoryId: null,
       firstInvoiceMonth: '2026-09',
     })
@@ -210,10 +216,9 @@ describe('CardsPage', () => {
     const dialog = await screen.findByRole('dialog')
     await user.type(await within(dialog).findByLabelText(/^Descrição/), 'Sofa')
     await user.type(within(dialog).getByLabelText(/^Valor total/), '20000')
-    await user.clear(within(dialog).getByLabelText(/^Parcelas/))
-    await user.type(within(dialog).getByLabelText(/^Parcelas/), '2')
-    await user.clear(within(dialog).getByLabelText(/^Começa na parcela/))
-    await user.type(within(dialog).getByLabelText(/^Começa na parcela/), '9')
+    await user.click(within(dialog).getByRole('button', { name: 'Parcelado' }))
+    await user.clear(within(dialog).getByLabelText(/^Parcela número/))
+    await user.type(within(dialog).getByLabelText(/^Parcela número/), '9')
     await user.type(within(dialog).getByLabelText(/^Total de parcelas/), '10')
     await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
 
@@ -241,14 +246,145 @@ describe('CardsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Editar Flight' }))
     const dialog = await screen.findByRole('dialog')
 
-    expect(await within(dialog).findByLabelText(/^Começa na parcela/)).toHaveValue(2)
+    expect(await within(dialog).findByLabelText(/^Parcela número/)).toHaveValue(2)
     expect(within(dialog).getByLabelText(/^Total de parcelas/)).toHaveValue(6)
+  })
+
+  it('keeps the plan of a purchase registered without its last installments while the plan is not changed', async () => {
+    const { user } = await renderCards()
+    vi.spyOn(cardsApi, 'getPurchase').mockResolvedValue({
+      id: 11, cardId: 1, categoryId: null, description: 'Flight', purchaseDate: '2026-08-20', amount: 200,
+      installments: 2, firstInstallmentNumber: 2, totalInstallments: 6, firstInvoiceMonth: '2026-10',
+    })
+    const update = vi.spyOn(cardsApi, 'updatePurchase').mockResolvedValue({} as CardPurchase)
+
+    await user.click(screen.getByRole('button', { name: 'Editar Flight' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(await within(dialog).findByRole('button', { name: 'Salvar' }))
+    expect(update).toHaveBeenLastCalledWith(1, 11, expect.objectContaining({ installments: 2, firstInstallmentNumber: 2, totalInstallments: 6 }))
+  })
+
+  it('refuses a split purchase without a sensible plan before calling the server', async () => {
+    const { user } = await renderCards()
+    const create = vi.spyOn(cardsApi, 'createPurchase').mockResolvedValue({} as CardPurchase)
+
+    await user.click(screen.getByRole('button', { name: 'Nova compra' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(await within(dialog).findByLabelText(/^Descrição/), 'Sofa')
+    await user.type(within(dialog).getByLabelText(/^Valor total/), '20000')
+    await user.click(within(dialog).getByRole('button', { name: 'Parcelado' }))
+    await user.clear(within(dialog).getByLabelText(/^Parcela número/))
+    await user.type(within(dialog).getByLabelText(/^Parcela número/), '7')
+    await user.type(within(dialog).getByLabelText(/^Total de parcelas/), '6')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+
+    expect(within(dialog).getByText('A parcela deve estar entre 1 e 6.')).toBeInTheDocument()
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('saves and opens a blank form for the next purchase, keeping the date', async () => {
+    const { invoice, user } = await renderCards()
+    const create = vi.spyOn(cardsApi, 'createPurchase').mockResolvedValue({} as CardPurchase)
+
+    await user.click(screen.getByRole('button', { name: 'Nova compra' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Nova compra · Main' })
+    await user.type(await within(dialog).findByLabelText(/^Descrição/), 'Bakery')
+    await user.clear(within(dialog).getByLabelText(/^Data da compra/))
+    await user.type(within(dialog).getByLabelText(/^Data da compra/), '2026-10-05')
+    await user.type(within(dialog).getByLabelText(/^Valor total/), '1200')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar e nova' }))
+
+    expect(create).toHaveBeenCalledWith(1, expect.objectContaining({ description: 'Bakery', purchaseDate: '2026-10-05', amount: 12 }))
+    const next = await screen.findByRole('dialog', { name: 'Nova compra · Main' })
+    expect(await within(next).findByRole('status')).toHaveTextContent('"Bakery" lançada.')
+    expect(within(next).getByLabelText(/^Descrição/)).toHaveValue('')
+    expect(within(next).getByLabelText(/^Valor total/)).toHaveValue('')
+    expect(within(next).getByLabelText(/^Data da compra/)).toHaveValue('2026-10-05')
+    await waitFor(() => expect(invoice).toHaveBeenCalledTimes(2))
+  })
+
+  it('suggests the category of the merchant typed, until a category is picked by hand', async () => {
+    const { user } = await renderCards([main, second, retired], [{ id: 1, name: 'Posto Shell', categoryId: 2 }])
+    const create = vi.spyOn(cardsApi, 'createPurchase').mockResolvedValue({} as CardPurchase)
+
+    await user.click(screen.getByRole('button', { name: 'Nova compra' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(await within(dialog).findByLabelText(/^Descrição/), 'POSTO SHELL 123')
+    expect(within(dialog).getByLabelText(/^Categoria/)).toHaveValue('2')
+    expect(within(dialog).getByText('Sugerida pelo estabelecimento Posto Shell.')).toBeInTheDocument()
+
+    await user.selectOptions(within(dialog).getByLabelText(/^Categoria/), 'Mercado')
+    await user.type(within(dialog).getByLabelText(/^Descrição/), ' loja')
+    expect(within(dialog).getByLabelText(/^Categoria/)).toHaveValue('1')
+    await user.type(within(dialog).getByLabelText(/^Valor total/), '5000')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+    expect(create).toHaveBeenCalledWith(1, expect.objectContaining({ categoryId: 1 }))
+  })
+
+  it('tells the invoice a purchase falls in, and lets another one be chosen', async () => {
+    const { user } = await renderCards()
+    const create = vi.spyOn(cardsApi, 'createPurchase').mockResolvedValue({} as CardPurchase)
+
+    await user.click(screen.getByRole('button', { name: 'Nova compra' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(await within(dialog).findByLabelText(/^Descrição/), 'Shoes')
+    await user.type(within(dialog).getByLabelText(/^Valor total/), '5000')
+    expect(within(dialog).getByText(/Entra na fatura de outubro de 2026/)).toBeInTheDocument()
+    await user.clear(within(dialog).getByLabelText(/^Data da compra/))
+    await user.type(within(dialog).getByLabelText(/^Data da compra/), '2026-10-12')
+    expect(within(dialog).getByText(/Entra na fatura de novembro de 2026/)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Escolher outra fatura' }))
+    await user.type(within(dialog).getByLabelText(/^Fatura/), '2026-12')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+    expect(create).toHaveBeenCalledWith(1, expect.objectContaining({ firstInvoiceMonth: '2026-12' }))
+  })
+
+  it('asks before putting a purchase on an invoice that already closed and was paid', async () => {
+    const { user } = await renderCards()
+    const create = vi.spyOn(cardsApi, 'createPurchase').mockResolvedValue({} as CardPurchase)
+    const paidSeptember = { months: Array.from({ length: 12 }, (_, index) => ({ month: index + 1, entries: index === 8 ? [{ lineId: 7, amount: 900, settled: true }] : [] })) }
+    vi.spyOn(budgetYearsApi, 'get').mockResolvedValue(paidSeptember as unknown as BudgetYear)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    await user.click(screen.getByRole('button', { name: 'Nova compra' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(await within(dialog).findByLabelText(/^Descrição/), 'Late charge')
+    await user.type(within(dialog).getByLabelText(/^Valor total/), '5000')
+    await user.clear(within(dialog).getByLabelText(/^Data da compra/))
+    await user.type(within(dialog).getByLabelText(/^Data da compra/), '2026-09-02')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+
+    expect(confirm).toHaveBeenCalledWith('A fatura de setembro de 2026 já fechou e foi paga. Lançar a compra nela mesmo assim?')
+    expect(create).not.toHaveBeenCalled()
+
+    confirm.mockReturnValue(true)
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(1, expect.objectContaining({ purchaseDate: '2026-09-02' })))
+  })
+
+  it('does not ask for an invoice that closed but is still to be paid', async () => {
+    const { user } = await renderCards()
+    const create = vi.spyOn(cardsApi, 'createPurchase').mockResolvedValue({} as CardPurchase)
+    vi.spyOn(budgetYearsApi, 'get').mockResolvedValue({ months: [] } as unknown as BudgetYear)
+    const confirm = vi.spyOn(window, 'confirm')
+
+    await user.click(screen.getByRole('button', { name: 'Nova compra' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(await within(dialog).findByLabelText(/^Descrição/), 'Late charge')
+    await user.type(within(dialog).getByLabelText(/^Valor total/), '5000')
+    await user.clear(within(dialog).getByLabelText(/^Data da compra/))
+    await user.type(within(dialog).getByLabelText(/^Data da compra/), '2026-09-02')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(create).toHaveBeenCalled())
+    expect(confirm).not.toHaveBeenCalled()
   })
 
   it('keeps the form open with the server errors when saving fails', async () => {
     const { user } = await renderCards()
     vi.spyOn(cardsApi, 'createPurchase').mockRejectedValue(
-      new ApiError(400, 'Um ou mais campos são inválidos.', { installments: 'O número de parcelas deve estar entre 1 e 48.' }),
+      new ApiError(400, 'Um ou mais campos são inválidos.', { description: 'A descrição deve ter no máximo 120 caracteres.' }),
     )
 
     await user.click(screen.getByRole('button', { name: 'Nova compra' }))
@@ -258,7 +394,7 @@ describe('CardsPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Um ou mais campos são inválidos.')
-    expect(within(dialog).getByText('O número de parcelas deve estar entre 1 e 48.')).toBeInTheDocument()
+    expect(within(dialog).getByText('A descrição deve ter no máximo 120 caracteres.')).toBeInTheDocument()
   })
 
   it('deletes a purchase after confirmation, warning that every installment goes', async () => {

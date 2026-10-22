@@ -18,6 +18,9 @@ import type {
   CardPurchase,
   CardPurchaseInput,
   CardSpendingYear,
+  Merchant,
+  MerchantInput,
+  MerchantSuggestion,
   CompanyBudgetLink,
   CompanyMonthInput,
   CompanyYear,
@@ -111,6 +114,16 @@ export const cardCategoriesApi = {
   create: (input: CardCategoryInput) => request<CardCategory>('POST', '/api/card-categories', input),
   update: (id: number, input: CardCategoryInput) => request<CardCategory>('PUT', `/api/card-categories/${id}`, input),
   remove: (id: number) => request<void>('DELETE', `/api/card-categories/${id}`),
+}
+
+export const merchantsApi = {
+  list: () => request<Merchant[]>('GET', '/api/merchants'),
+  create: (input: MerchantInput) => request<Merchant>('POST', '/api/merchants', input),
+  update: (id: number, input: MerchantInput) => request<Merchant>('PUT', `/api/merchants/${id}`, input),
+  remove: (id: number) => request<void>('DELETE', `/api/merchants/${id}`),
+  /** Registers several at once: all of them, or none. */
+  createAll: (merchants: MerchantInput[]) => request<Merchant[]>('POST', '/api/merchant-batches', { merchants }),
+  suggestions: (minPurchases = 2) => request<MerchantSuggestion[]>('GET', `/api/merchant-suggestions?minPurchases=${minPurchases}`),
 }
 
 export const cardSpendingApi = {

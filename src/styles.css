@@ -1048,9 +1048,49 @@ a.button {
   align-items: start;
 }
 
+/* A toggle and a checkbox side by side, as in the purchase form ("Parcelado", "É um estorno"). */
+.form-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+/* An action inside a sentence: looks like a link, works like a button. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* A plain money cell of a dense table, with the room a clickable cell has. */
 .budget-table .amount {
   padding: 4px 5px;
+}
+
+/* A short list first and a wide table second (Estabelecimentos: the registered ones and the suggestions). */
+.columns-wide-right {
+  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .columns-wide-right {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A filter and a note above a table inside a panel. */
+.panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--border);
 }
 
 /* Two lists side by side where the first one is a wide table and the second a short list. */

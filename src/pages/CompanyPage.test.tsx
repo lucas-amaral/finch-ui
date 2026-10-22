@@ -64,6 +64,8 @@ const line = (id: number, name: string, kind: BudgetLine['kind'], active = true)
   sessionPrice: null,
   sessionWeekday: null,
   sessionsFromPreviousMonth: true,
+  sessionFrequency: 'WEEKLY',
+  sessionReferenceDate: null,
   sortOrder: id,
 })
 

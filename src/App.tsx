@@ -9,6 +9,7 @@ import { ComparisonPage } from './pages/ComparisonPage'
 import { CardSettingsPage } from './pages/CardSettingsPage'
 import { CardsPage } from './pages/CardsPage'
 import { HolidaysPage } from './pages/HolidaysPage'
+import { MerchantsPage } from './pages/MerchantsPage'
 import { LoginPage } from './pages/LoginPage'
 import { MonthPage } from './pages/MonthPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -56,6 +57,7 @@ export default function App() {
                 <Route index element={<Navigate to="/settings/lines" replace />} />
                 <Route path="lines" element={<BudgetLinesPage />} />
                 <Route path="cards" element={<CardSettingsPage />} />
+                <Route path="merchants" element={<MerchantsPage />} />
                 <Route path="holidays" element={<HolidaysPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
