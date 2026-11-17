@@ -400,19 +400,44 @@ export interface CompanyMonth extends CompanyMonthInput {
   usedExchangeRate: number
   /** The invoice in reais. */
   revenue: number
-  grossProLabore: number
+  /** The gross pay of the month: the one typed from the payslip, or the one the rules give. */
+  proLabore: number
+  /** The smallest pay that keeps the payroll factor at 28% two periods ahead; null before the rule (10/2026). */
+  suggestedProLabore: number | null
   inss: number
+  calculatedInss: number
   irrf: number
+  calculatedIrrf: number
   netProLabore: number
+  cpp: number
   das: number
+  calculatedDas: number
+  /** The values typed from the real payslip and guides; null keeps the calculated one. */
+  adjustments: CompanyAdjustments
+  /** Pay plus CPP: the payroll of the month for the payroll factor. */
+  payroll: number
   totalTaxes: number
   /** `totalTaxes` over `revenue`, as a fraction. */
   taxRate: number
   revenueLast12Months: number
   effectiveRate: number
-  /** Payroll over revenue of the last 12 months, as a fraction; null with nothing behind the month. */
+  payrollLast12Months: number
+  paidPayrollLast12Months: number
+  /** Payroll over revenue of the last 12 months as the PGDAS-D counts it, as a fraction; null with nothing behind the month. */
   factorR: number | null
+  /** The same by the payroll actually paid in the 12 months before. */
+  paidFactorR: number | null
+  /** Either count below 28%: the month would fall into Anexo V. */
+  factorRBelowMinimum: boolean
   exchangeVariation: number | null
+}
+
+/** Values of a month taken from the real documents, each replacing the calculated one; null keeps the calculation. */
+export interface CompanyAdjustments {
+  proLabore: number | null
+  das: number | null
+  inss: number | null
+  irrf: number | null
 }
 
 export interface CompanyYear {

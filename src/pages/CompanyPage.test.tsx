@@ -28,16 +28,27 @@ const september = (year: number): CompanyMonth => ({
   projected: false,
   usedExchangeRate: 5.1999,
   revenue: 37439.28,
-  grossProLabore: 8924,
+  proLabore: 8924,
+  suggestedProLabore: null,
   inss: 932.31,
+  calculatedInss: 932.31,
   irrf: 1236.85,
+  calculatedIrrf: 1236.85,
   netProLabore: 6754.84,
+  cpp: 1559.91,
   das: 1829.48,
+  calculatedDas: 1829.48,
+  adjustments: { proLabore: null, das: null, inss: null, irrf: null },
+  payroll: 10483.91,
   totalTaxes: 3998.64,
   taxRate: 0.1068,
   revenueLast12Months: 452334.24,
+  payrollLast12Months: 126653.59,
+  paidPayrollLast12Months: 126400,
   effectiveRate: 0.096,
   factorR: 0.28,
+  paidFactorR: 0.2794,
+  factorRBelowMinimum: true,
   exchangeVariation: -1104.3,
 })
 
@@ -69,9 +80,9 @@ const line = (id: number, name: string, kind: BudgetLine['kind'], active = true)
   sortOrder: id,
 })
 
-async function renderCompany() {
+async function renderCompany(months: (year: number) => CompanyMonth[] = (which) => [september(which), october(which)]) {
   vi.spyOn(companyApi, 'prepareCurrentMonth').mockResolvedValue(undefined)
-  const year = vi.spyOn(companyApi, 'year').mockImplementation(async (which) => ({ year: which, months: [september(which), october(which)] }))
+  const year = vi.spyOn(companyApi, 'year').mockImplementation(async (which) => ({ year: which, months: months(which) }))
   vi.spyOn(companyApi, 'taxYears').mockResolvedValue([rules(2025, 8157.41), rules(2026, 8475.55)])
   vi.spyOn(companyApi, 'incomeStatement').mockImplementation(async (which) => ({
     year: which,
@@ -80,10 +91,10 @@ async function renderCompany() {
     netRevenue: 71219.6,
     proLabore: 20966,
     payrollTaxes: 4338.32,
-    operatingExpenses: 25304.32,
+    operatingExpenses: 20966,
     exchangeGains: 0,
     exchangeLosses: 1104.3,
-    result: 44810.98,
+    result: 49149.3,
   }))
   vi.spyOn(companyApi, 'budgetLink').mockResolvedValue({ incomeLineId: 1, payrollTaxLineId: null, dasLineId: null })
   vi.spyOn(budgetLinesApi, 'list').mockResolvedValue([
@@ -113,10 +124,13 @@ describe('CompanyPage', () => {
     expect(year).toHaveBeenCalledWith(2026)
     const row = screen.getByRole('row', { name: /^Setembro/ })
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent)).toEqual([
-      '7.200,00', '5,1999', '37.439,28', '8.924,00', '932,31', '1.236,85', '6.754,84', '1.829,48', '10,68%',
-      '36.334,98', '-1.104,30', '452.334,24', '9,60%', '28,00%', '58',
+      '7.200,00', '5,1999', '37.439,28', '8.924,00', '932,31', '1.236,85', '6.754,84', '1.829,48',
+      '36.334,98', '-1.104,30', '452.334,24', '9,60%', '28,00%', '27,94%', '58',
     ])
     expect(within(row).getByText('-1.104,30')).toHaveClass('negative')
+    // Below 28% by the payroll actually paid: the month would fall into Anexo V.
+    expect(within(row).getByText('27,94%')).toHaveClass('warning')
+    expect(within(row).getByText('28,00%')).not.toHaveClass('warning')
     expect(within(screen.getByRole('row', { name: /^Janeiro/ })).getByText('sem invoice')).toBeInTheDocument()
   })
 
@@ -190,9 +204,10 @@ describe('CompanyPage', () => {
     const amount = (label: string) => within(within(statement).getByText(label).closest('tr')!).getAllByRole('cell')[1].textContent
     expect(amount('Receita operacional bruta')).toBe('74.878,56')
     expect(amount('(−) Simples Nacional')).toBe('3.658,96')
-    expect(amount('Pró-labore')).toBe('20.966,00')
+    expect(amount('(−) Despesas operacionais (pró-labore bruto)')).toBe('20.966,00')
+    expect(amount('dos quais INSS e IR retidos do sócio')).toBe('4.338,32')
     expect(amount('(−) Variação cambial passiva')).toBe('1.104,30')
-    expect(amount('Resultado')).toBe('44.810,98')
+    expect(amount('Resultado')).toBe('49.149,30')
   })
 
   it('chooses the budget lines the company fills in, offering incomes and active bills where each fits', async () => {
@@ -248,9 +263,9 @@ describe('CompanyPage', () => {
       expect.stringContaining('Transferir para a conta pessoal'),
     ])
     expect(steps[0]).toHaveTextContent('falta a cotação do dólar')
-    // 99% of the invoice is expected in, and the three taxes go out of it.
-    expect(steps[1]).toHaveTextContent('R$ 37.064,89')
-    expect(steps[3]).toHaveTextContent('R$ 33.066,25')
+    // 99.7% of the invoice is expected in, and the three taxes go out of it.
+    expect(steps[1]).toHaveTextContent('R$ 37.326,96')
+    expect(steps[3]).toHaveTextContent('R$ 33.328,32')
   })
 
   it('shows a closed month with what actually came in and what goes to the owner', async () => {
@@ -298,6 +313,46 @@ describe('CompanyPage', () => {
     await user.click(within(focus).getByRole('button', { name: 'Marcar como feito: Transferir para a conta pessoal' }))
 
     expect(setClosing).toHaveBeenCalledWith('2026-09', { taxesPaid: true, transferred: true })
+  })
+
+  it('flags the month whose payroll factor fell below 28 percent, showing both counts', async () => {
+    await renderCompany()
+
+    // October's invoice is issued at the end of September: the competência of its guides.
+    expect(screen.getByText('competência 09/2026')).toBeInTheDocument()
+    const indicators = screen.getByRole('group', { name: 'Indicadores' })
+
+    expect(screen.getByText('Fator R abaixo de 28%')).toBeInTheDocument()
+    expect(within(indicators).getByText('Fator R (PGDAS-D)').nextSibling).toHaveTextContent('28,00%')
+    expect(within(indicators).getByText('Fator R pago').nextSibling).toHaveTextContent('27,94%')
+    expect(within(indicators).getByText('Fator R pago').nextSibling).toHaveClass('warning')
+  })
+
+  it('takes the values of the real payslip and guides, blank keeping the calculation', async () => {
+    const { year, user } = await renderCompany()
+    const adjust = vi.spyOn(companyApi, 'adjust').mockResolvedValue(undefined)
+
+    await user.click(screen.getByRole('button', { name: 'Ajustar valores' }))
+    // October, the current month, is the one in focus.
+    const dialog = screen.getByRole('dialog', { name: 'Valores reais · outubro de 2026' })
+    expect(within(dialog).getByText('Em branco, vale o cálculo: 1.829,48.')).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText(/^Pró-labore bruto pago/), '900000')
+    await user.type(within(dialog).getByLabelText(/^DAS da guia/), '183000')
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }))
+
+    expect(adjust).toHaveBeenCalledWith('2026-10', { proLabore: 9000, das: 1830, inss: null, irrf: null })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(year).toHaveBeenCalledTimes(2))
+  })
+
+  it('marks the values that came from the real documents, with the calculated one beside them', async () => {
+    const adjusted = { das: 1830, adjustments: { proLabore: null, das: 1830, inss: null, irrf: null } }
+    await renderCompany((which) => [{ ...september(which), ...adjusted }, { ...october(which), ...adjusted }])
+
+    const row = screen.getByRole('row', { name: /^Setembro/ })
+    expect(within(row).getByText(/1\.830,00/)).toHaveAttribute('title', 'Valor real informado; o cálculo dá 1.829,48.')
+    const calculation = screen.getByRole('group', { name: 'Cálculo do mês' })
+    expect(within(calculation).getByText(/cálculo: 1\.829,48/)).toBeInTheDocument()
   })
 
   it('writes the month up for the accountant, to be copied or printed', async () => {

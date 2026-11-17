@@ -733,6 +733,17 @@ tbody tr:hover {
   color: var(--muted);
 }
 
+.chip-warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+/* A value typed from the real documents instead of the calculated one (Empresa). */
+td.adjusted {
+  font-style: italic;
+}
+
 .button-danger {
   border-color: transparent;
   background: none;

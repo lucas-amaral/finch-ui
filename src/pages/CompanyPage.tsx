@@ -6,7 +6,7 @@ import { budgetLinesApi, companyApi } from '../api/endpoints'
 import type { BudgetLine, CompanyBudgetLink, CompanyMonth, IncomeStatement, TaxYear } from '../api/types'
 import { CurrencyInput } from '../components/CurrencyInput'
 import { ErrorBanner, Field, Loading, Modal, PageHeader, Stepper, SuccessBanner } from '../components/ui'
-import { MONTH_NAMES, currentYearMonth, formatAmount, formatDate, formatExchangeRate, formatMoney, formatRate, toYearMonth } from '../lib/format'
+import { MONTH_NAMES, currentYearMonth, formatAmount, formatDate, formatExchangeRate, formatMoney, formatRate, shiftMonth, toYearMonth } from '../lib/format'
 import { useLoad } from '../lib/useLoad'
 
 export function CompanyPage() {
@@ -83,9 +83,6 @@ export function CompanyPage() {
                     <th className="numeric">IR</th>
                     <th className="numeric">Pró-labore líquido</th>
                     <th className="numeric">DAS</th>
-                    <th className="numeric" title="INSS, IR e DAS sobre a nota.">
-                      Impostos
-                    </th>
                     <th className="numeric">Entrou no Brasil</th>
                     <th className="numeric" title="O que entrou menos a nota.">
                       Variação cambial
@@ -94,7 +91,12 @@ export function CompanyPage() {
                     <th className="numeric" title="Alíquota efetiva do Simples Nacional.">
                       Alíquota
                     </th>
-                    <th className="numeric">Fator R</th>
+                    <th className="numeric" title="Folha dos 12 meses anteriores sobre o faturamento, como o PGDAS-D soma.">
+                      Fator R
+                    </th>
+                    <th className="numeric" title="O mesmo pela folha efetivamente paga nos 12 meses anteriores (regime de caixa).">
+                      Fator R pago
+                    </th>
                     <th className="numeric">Nota nº</th>
                   </tr>
                 </thead>
@@ -193,23 +195,53 @@ function MonthRow({ name, month, current, onEdit }: MonthRowProps) {
         {(month.estimated || month.projected) && ' *'}
       </td>
       <td className="numeric total">{formatAmount(month.revenue)}</td>
-      <td className="numeric amount">{formatAmount(month.grossProLabore)}</td>
-      <td className="numeric amount">{formatAmount(month.inss)}</td>
-      <td className="numeric amount">{formatAmount(month.irrf)}</td>
+      <AdjustableCell value={month.proLabore} adjusted={month.adjustments.proLabore} calculated={month.suggestedProLabore} />
+      <AdjustableCell value={month.inss} adjusted={month.adjustments.inss} calculated={month.calculatedInss} />
+      <AdjustableCell value={month.irrf} adjusted={month.adjustments.irrf} calculated={month.calculatedIrrf} />
       <td className="numeric total">{formatAmount(month.netProLabore)}</td>
-      <td className="numeric total">{formatAmount(month.das)}</td>
-      <td className="numeric amount">{formatRate(month.taxRate)}</td>
+      <AdjustableCell value={month.das} adjusted={month.adjustments.das} calculated={month.calculatedDas} total />
       <td className="numeric amount">{month.receivedBrl === null ? '—' : formatAmount(month.receivedBrl)}</td>
       <td className={`numeric amount${variation === null || variation === 0 ? '' : variation > 0 ? ' positive' : ' negative'}`}>
         {variation === null ? '—' : formatAmount(variation)}
       </td>
       <td className="numeric amount">{formatAmount(month.revenueLast12Months)}</td>
       <td className="numeric amount">{formatRate(month.effectiveRate)}</td>
-      <td className="numeric amount">{month.factorR === null ? '—' : formatRate(month.factorR)}</td>
+      <FactorCell value={month.factorR} />
+      <FactorCell value={month.paidFactorR} />
       <td className="numeric amount">{month.invoiceNumber ?? '—'}</td>
     </tr>
   )
 }
+
+/** The payroll factor, in orange below 28% (the month would fall into Anexo V). */
+function FactorCell({ value }: { value: number | null }) {
+  const below = value !== null && value < MIN_FACTOR_R
+  return (
+    <td className={`numeric amount${below ? ' warning' : ''}`} title={below ? 'Abaixo de 28%: a empresa cairia no Anexo V.' : undefined}>
+      {value === null ? '—' : formatRate(value)}
+    </td>
+  )
+}
+
+/** A value that may come from the real documents: marked, with the calculated one in the tooltip. */
+function AdjustableCell({ value, adjusted, calculated, total }: { value: number; adjusted: number | null; calculated: number | null; total?: boolean }) {
+  const title = adjusted !== null && calculated !== null ? `Valor real informado; o cálculo dá ${formatAmount(calculated)}.` : undefined
+  return (
+    <td className={`numeric ${total ? 'total' : 'amount'}${adjusted !== null ? ' adjusted' : ''}`} title={title}>
+      {formatAmount(value)}
+      {adjusted !== null && ' •'}
+    </td>
+  )
+}
+
+/** `2026-10` → `09/2026`: the invoice of a month is issued at the end of the month before, its competência. */
+function competenceOf(month: string): string {
+  const [year, value] = shiftMonth(month, -1).split('-')
+  return `${value}/${year}`
+}
+
+/** Below this the company leaves Anexo III. */
+const MIN_FACTOR_R = 0.28
 
 function Rules({ rules, year, onEdit }: { rules: TaxYear; year: number; onEdit: () => void }) {
   return (
@@ -263,9 +295,8 @@ function Statement({ statement }: { statement: IncomeStatement }) {
           {line('Receita operacional bruta', statement.grossRevenue, 'total')}
           {line('(−) Simples Nacional', statement.simplesNacional)}
           {line('Receita operacional líquida', statement.netRevenue, 'total')}
-          {line('(−) Despesas operacionais', statement.operatingExpenses, 'total')}
-          {line('Pró-labore', statement.proLabore)}
-          {line('Impostos (INSS e IR)', statement.payrollTaxes)}
+          {line('(−) Despesas operacionais (pró-labore bruto)', statement.operatingExpenses, 'total')}
+          {line('dos quais INSS e IR retidos do sócio', statement.payrollTaxes)}
           {line('(+) Variação cambial ativa', statement.exchangeGains)}
           {line('(−) Variação cambial passiva', statement.exchangeLosses)}
           {line('Resultado', statement.result, 'total')}
@@ -316,23 +347,24 @@ function BudgetLinkForm({ link, lines }: { link: CompanyBudgetLink; lines: Budge
       </header>
       <form className="form" onSubmit={submit}>
         <p className="muted">
-          A empresa preenche sozinha estas linhas das contas do mês, nos meses que têm invoice. Conta já marcada como paga não é alterada.
+          A empresa preenche sozinha estas linhas das contas do mês, nos meses que têm invoice, e as duas contas de imposto andam juntas com a empresa: mudar o valor
+          numa conta do mês vira o valor real do mês da empresa, e ajustar a empresa muda a conta. O recálculo automático não mexe em conta já paga.
         </p>
         <ErrorBanner message={error} />
         {saved && <SuccessBanner message="Ligação salva e contas do mês atualizadas." />}
-        <Field label="Renda da empresa" hint="O que entrou no Brasil ou, até entrar, a nota menos 1%.">
+        <Field label="Renda da empresa" hint="O que entrou no Brasil ou, até entrar, a nota menos 0,3%.">
           <select value={incomeLineId} onChange={(event) => setIncomeLineId(event.target.value)}>
             <option value="">Nenhuma</option>
             {options('INCOME', incomeLineId)}
           </select>
         </Field>
-        <Field label="INSS e IR" hint="O INSS do mês mais o IR do mês anterior.">
+        <Field label="INSS e IR" hint="O INSS do mês mais o IR do mês anterior. Digitado na conta do mês, ajusta o INSS do mês.">
           <select value={payrollTaxLineId} onChange={(event) => setPayrollTaxLineId(event.target.value)}>
             <option value="">Nenhuma</option>
             {options('EXPENSE', payrollTaxLineId)}
           </select>
         </Field>
-        <Field label="DAS" hint="O DAS do próprio mês.">
+        <Field label="DAS" hint="O DAS do próprio mês. Digitado na conta do mês, vira o DAS real do mês.">
           <select value={dasLineId} onChange={(event) => setDasLineId(event.target.value)}>
             <option value="">Nenhuma</option>
             {options('EXPENSE', dasLineId)}
@@ -526,7 +558,7 @@ function RulesForm({ year, rules, onClose, onSaved }: RulesFormProps) {
 }
 
 /** The share of the invoice that is expected to reach the account while the real amount is unknown. */
-const EXPECTED_AFTER_FEES = 0.99
+const EXPECTED_AFTER_FEES = 0.997
 
 interface MonthFocusProps {
   year: number
@@ -546,6 +578,7 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
   const name = MONTH_NAMES[month - 1]
   const [error, setError] = useState<string | null>(null)
   const [summarizing, setSummarizing] = useState(false)
+  const [adjusting, setAdjusting] = useState(false)
   if (!data) {
     return (
       <section className="panel month-strip" aria-label="Mês em foco">
@@ -563,7 +596,7 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
   /** The first two steps follow from the invoice; the last two are ticked by hand. */
   const steps: Step[] = [
     { name: 'Emitir a nota', value: data.revenue, done: !data.estimated, pending: 'falta a cotação do dólar' },
-    { name: 'Receber o câmbio', value: received, done: data.receivedBrl !== null, pending: 'previsão: a nota menos 1%' },
+    { name: 'Receber o câmbio', value: received, done: data.receivedBrl !== null, pending: 'previsão: a nota menos 0,3%' },
     { name: 'Pagar DAS, INSS e IR', value: data.totalTaxes, done: data.taxesPaid, pending: 'vencem no dia 20', flag: 'taxesPaid' },
     { name: 'Transferir para a conta pessoal', value: personal, done: data.transferred, pending: 'pró-labore mais lucro', flag: 'transferred' },
   ]
@@ -582,9 +615,20 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
     <section className="company-focus" aria-label="Mês em foco">
       <div className="week-focus-head">
         <MonthStepper name={name} year={year} onPrevious={onPrevious} onNext={onNext} />
+        <span className="muted" title="A nota de um mês é emitida no fim do mês anterior: é a competência das guias e do PGDAS-D.">
+          competência {competenceOf(data.month)}
+        </span>
         {data.projected && <span className="chip chip-neutral" title="Sem invoice ou sem a cotação própria: calculado com o dólar de hoje.">projeção com o dólar de hoje</span>}
         {data.estimated && !data.projected && <span className="chip chip-neutral">previsão</span>}
-        <button type="button" className="button push-left" onClick={() => setSummarizing(true)}>
+        {data.factorRBelowMinimum && (
+          <span className="chip chip-warning" title="Pela soma do PGDAS-D ou pela folha paga, o Fator R ficou abaixo de 28%: a empresa cairia no Anexo V.">
+            Fator R abaixo de 28%
+          </span>
+        )}
+        <button type="button" className="button push-left" onClick={() => setAdjusting(true)}>
+          Ajustar valores
+        </button>
+        <button type="button" className="button" onClick={() => setSummarizing(true)}>
           Resumo para a contabilidade
         </button>
         <button type="button" className="button button-primary" onClick={onEdit}>
@@ -626,13 +670,29 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
           <dl className="check-lines statement-lines">
             <dt>Nota fiscal</dt>
             <dd>{formatAmount(data.revenue)}</dd>
-            <dt>Simples Nacional (DAS) · alíquota efetiva de {formatRate(data.effectiveRate)}</dt>
+            <dt>
+              Simples Nacional (DAS) · alíquota efetiva de {formatRate(data.effectiveRate)}
+              <AdjustedNote adjusted={data.adjustments.das} calculated={data.calculatedDas} />
+            </dt>
             <dd className="negative">-{formatAmount(data.das)}</dd>
-            <dt>Pró-labore bruto</dt>
-            <dd>{formatAmount(data.grossProLabore)}</dd>
-            <dt>INSS</dt>
+            <dt>
+              Pró-labore bruto
+              {data.adjustments.proLabore !== null ? (
+                <AdjustedNote adjusted={data.adjustments.proLabore} calculated={data.suggestedProLabore} label="sugerido" />
+              ) : (
+                data.suggestedProLabore !== null && <span className="muted"> · o mínimo para manter o Fator R em 28%</span>
+              )}
+            </dt>
+            <dd>{formatAmount(data.proLabore)}</dd>
+            <dt>
+              INSS
+              <AdjustedNote adjusted={data.adjustments.inss} calculated={data.calculatedInss} />
+            </dt>
             <dd className="negative">-{formatAmount(data.inss)}</dd>
-            <dt>Imposto de renda retido</dt>
+            <dt>
+              Imposto de renda retido
+              <AdjustedNote adjusted={data.adjustments.irrf} calculated={data.calculatedIrrf} />
+            </dt>
             <dd className="negative">-{formatAmount(data.irrf)}</dd>
             <dt>Pró-labore líquido</dt>
             <dd>{formatAmount(data.netProLabore)}</dd>
@@ -654,8 +714,22 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
           </div>
           <div className="panel" role="group" aria-label="Indicadores">
             <dl className="check-lines week-parts indicators">
-              <dt>Fator R</dt>
-              <dd>{data.factorR === null ? '—' : formatRate(data.factorR)}</dd>
+              <dt title="Folha dos 12 meses anteriores sobre o faturamento, como o PGDAS-D soma.">Fator R (PGDAS-D)</dt>
+              <dd className={data.factorR !== null && data.factorR < MIN_FACTOR_R ? 'warning' : undefined}>
+                {data.factorR === null ? '—' : formatRate(data.factorR)}
+              </dd>
+              <dt title="Pela folha efetivamente paga nos 12 meses anteriores (pró-labore e DAS de um mês são pagos no seguinte).">Fator R pago</dt>
+              <dd className={data.paidFactorR !== null && data.paidFactorR < MIN_FACTOR_R ? 'warning' : undefined}>
+                {data.paidFactorR === null ? '—' : formatRate(data.paidFactorR)}
+              </dd>
+              {data.suggestedProLabore !== null && (
+                <>
+                  <dt title="O menor pró-labore deste mês (pago no seguinte) que mantém o Fator R em 28% pelos dois critérios, com R$ 100 de folga.">
+                    Pró-labore mínimo
+                  </dt>
+                  <dd>{formatAmount(data.suggestedProLabore)}</dd>
+                </>
+              )}
               <dt>Faturamento em 12 meses</dt>
               <dd>{formatAmount(data.revenueLast12Months)}</dd>
               <dt>Variação cambial</dt>
@@ -666,8 +740,110 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
           </div>
         </div>
       </div>
+      {adjusting && (
+        <AdjustmentsForm
+          name={name}
+          year={year}
+          data={data}
+          onClose={() => setAdjusting(false)}
+          onSaved={() => {
+            setAdjusting(false)
+            onChanged()
+          }}
+        />
+      )}
       {summarizing && <AccountingSummary name={name} year={year} data={data} received={received} personal={personal} onClose={() => setSummarizing(false)} />}
     </section>
+  )
+}
+
+/** " · ajustado (cálculo: 1.234,56)" next to a value taken from the real documents. */
+function AdjustedNote({ adjusted, calculated, label = 'cálculo' }: { adjusted: number | null; calculated: number | null; label?: string }) {
+  if (adjusted === null) return null
+  return (
+    <span className="muted">
+      {' · '}
+      <span className="chip chip-neutral">ajustado</span>
+      {calculated !== null && ` ${label}: ${formatAmount(calculated)}`}
+    </span>
+  )
+}
+
+interface AdjustmentsFormProps {
+  name: string
+  year: number
+  data: CompanyMonth
+  onClose: () => void
+  onSaved: () => void
+}
+
+/**
+ * The values of the real payslip and guides of a month. Blank keeps the calculation. Saving updates the DAS and
+ * INSS/IR bills of the monthly budget (even paid ones), and the pay moves the payroll factor of the months after.
+ */
+function AdjustmentsForm({ name, year, data, onClose, onSaved }: AdjustmentsFormProps) {
+  const initial = (value: number | null) => (value === null ? '' : value.toFixed(2))
+  const [proLabore, setProLabore] = useState(initial(data.adjustments.proLabore))
+  const [das, setDas] = useState(initial(data.adjustments.das))
+  const [inss, setInss] = useState(initial(data.adjustments.inss))
+  const [irrf, setIrrf] = useState(initial(data.adjustments.irrf))
+  const [error, setError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const value = (text: string) => (text === '' ? null : Number(text))
+  const calculated = (amount: number | null) => (amount === null ? undefined : `Em branco, vale o cálculo: ${formatAmount(amount)}.`)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    setErrors({})
+    try {
+      await companyApi.adjust(data.month, { proLabore: value(proLabore), das: value(das), inss: value(inss), irrf: value(irrf) })
+      onSaved()
+    } catch (caught) {
+      setError(errorMessage(caught))
+      setErrors(fieldErrors(caught))
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal title={`Valores reais · ${name.toLowerCase()} de ${year}`} onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <p className="muted">
+          Use quando o holerite ou as guias não baterem com o cálculo. O DAS e o INSS vão para as contas do mês deste mês, e o IR para a conta de INSS e IR do
+          mês seguinte, mesmo que já estejam pagas.
+        </p>
+        <ErrorBanner message={error} />
+        <Field
+          label="Pró-labore bruto pago"
+          error={errors.proLabore}
+          hint={data.suggestedProLabore === null ? 'Em branco, vale o cálculo (28% da nota menos o CPP).' : `Em branco, vale o mínimo sugerido: ${formatAmount(data.suggestedProLabore)}.`}
+        >
+          <CurrencyInput value={proLabore} onChange={setProLabore} autoFocus />
+        </Field>
+        <Field label="DAS da guia" error={errors.das} hint={calculated(data.calculatedDas)}>
+          <CurrencyInput value={das} onChange={setDas} />
+        </Field>
+        <div className="form-row">
+          <Field label="INSS do sócio" error={errors.inss} hint={calculated(data.calculatedInss)}>
+            <CurrencyInput value={inss} onChange={setInss} />
+          </Field>
+          <Field label="IR retido" error={errors.irrf} hint={calculated(data.calculatedIrrf)}>
+            <CurrencyInput value={irrf} onChange={setIrrf} />
+          </Field>
+        </div>
+        <div className="form-actions">
+          <button type="button" className="button" onClick={onClose}>
+            Cancelar
+          </button>
+          <button type="submit" className="button button-primary" disabled={submitting}>
+            Salvar
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -697,6 +873,7 @@ function AccountingSummary({ name, year, data, received, personal, onClose }: Ac
   const text = [
     `Resumo de ${name.toLowerCase()} de ${year}`,
     '',
+    line('Competência', competenceOf(data.month)),
     line('Nota fiscal nº', data.invoiceNumber ?? 'não informado'),
     line('Invoice (US$)', formatAmount(data.invoiceUsd)),
     line('Cotação do dólar', formatExchangeRate(data.usedExchangeRate) + (data.estimated ? ' (previsão)' : '')),
@@ -704,11 +881,12 @@ function AccountingSummary({ name, year, data, received, personal, onClose }: Ac
     line(data.receivedBrl === null ? 'Previsto no banco (R$)' : 'Recebido no banco (R$)', formatAmount(received)),
     '',
     line('Faturamento em 12 meses (R$)', formatAmount(data.revenueLast12Months)),
-    line('Fator R', data.factorR === null ? 'sem base' : formatRate(data.factorR)),
+    line('Fator R (PGDAS-D)', data.factorR === null ? 'sem base' : formatRate(data.factorR)),
+    line('Fator R (folha paga)', data.paidFactorR === null ? 'sem base' : formatRate(data.paidFactorR)),
     line('Alíquota efetiva do Simples', formatRate(data.effectiveRate)),
     line('DAS (R$)', formatAmount(data.das)),
     '',
-    line('Pró-labore bruto (R$)', formatAmount(data.grossProLabore)),
+    line('Pró-labore bruto (R$)', formatAmount(data.proLabore)),
     line('INSS (R$)', formatAmount(data.inss)),
     line('IR retido na fonte (R$)', formatAmount(data.irrf)),
     line('Pró-labore líquido (R$)', formatAmount(data.netProLabore)),

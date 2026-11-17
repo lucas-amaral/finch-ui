@@ -18,6 +18,7 @@ import type {
   CardPurchase,
   CardPurchaseInput,
   CardSpendingYear,
+  CompanyAdjustments,
   Merchant,
   MerchantInput,
   MerchantSuggestion,
@@ -178,6 +179,8 @@ export const companyApi = {
   setClosing: (month: string, closing: { taxesPaid: boolean; transferred: boolean }) =>
     request<void>('PUT', `/api/company-months/${month}/closing`, closing),
   /** Fetches the dollar of the current month when it is still unknown, creating its invoice from the month before. */
+  /** The values of the real payslip and guides of a month; the bills of the monthly budget follow. */
+  adjust: (month: string, adjustments: CompanyAdjustments) => request<void>('PUT', `/api/company-months/${month}/adjustments`, adjustments),
   prepareCurrentMonth: () => request<void>('POST', '/api/company-month-preparations'),
   clearMonth: (month: string) => request<void>('DELETE', `/api/company-months/${month}`),
   /** The dollar the invoice of the month must use, from the central bank. */
