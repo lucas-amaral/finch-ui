@@ -680,7 +680,7 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
               {data.adjustments.proLabore !== null ? (
                 <AdjustedNote adjusted={data.adjustments.proLabore} calculated={data.suggestedProLabore} label="sugerido" />
               ) : (
-                data.suggestedProLabore !== null && <span className="muted"> · o mínimo para manter o Fator R em 28%</span>
+                data.suggestedProLabore !== null && <span className="muted"> · o mínimo para manter o Fator R em 29%</span>
               )}
             </dt>
             <dd>{formatAmount(data.proLabore)}</dd>
@@ -724,7 +724,7 @@ function MonthFocus({ year, month, data, onPrevious, onNext, onEdit, onChanged }
               </dd>
               {data.suggestedProLabore !== null && (
                 <>
-                  <dt title="O menor pró-labore deste mês (pago no seguinte) que mantém o Fator R em 28% pelos dois critérios, com R$ 100 de folga.">
+                  <dt title="O menor pró-labore deste mês que mantém o Fator R em 29% (um ponto acima do mínimo de 28%) pelos dois critérios.">
                     Pró-labore mínimo
                   </dt>
                   <dd>{formatAmount(data.suggestedProLabore)}</dd>
